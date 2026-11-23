@@ -242,4 +242,6 @@ Every user-visible change is recorded in [`CHANGELOG.md`](CHANGELOG.md). Add an 
 
 ## Credits
 
-Built on Automattic's local WordPress work, the WordPress design system and WordPress itself. siterun is GPL-3.0-or-later. Bundled WordPress, PHP and other third-party components keep their own licences.
+Built on Automattic's local WordPress work, the WordPress design system and WordPress itself. siterun is GPL-3.0-or-later. Bundled WordPress, PHP and other third-party components keep their own licences; see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
+Security reports: see [SECURITY.md](SECURITY.md).
