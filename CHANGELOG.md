@@ -6,7 +6,7 @@ Every user-visible change goes here. Keep the newest entry first and say what ch
 
 ### Added
 
-- **README wordmark.** The README opens with a single siterun lockup that reads on both light and dark GitHub themes.
+- **README wordmark.** The README uses separate light and dark SVGs, chosen by GitHub’s theme rather than the operating system, so the transparent lockup reads correctly in both.
 - **A siterun wordmark.** A `</>` mark, then `siterun` with an italic `run`. It appears on the landing page, in the sidebar footer and in About.
 - **The Going Bold credit.** The landing page ends with the Going Bold wordmark in "A GOING BOLD CONTRAPTION".
 - **Database browser.** A Database card on each site opens a full window with a table list and row counts, a sortable and searchable grid, 50-row pages, a cell inspector with copy, and a SQL console. It is read-only by default.

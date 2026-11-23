@@ -1,5 +1,6 @@
 <p align="center">
-	<img alt="siterun" src="assets/wordmark.svg" width="360">
+	<img alt="siterun" src="assets/wordmark-light.svg#gh-light-mode-only" width="360">
+	<img alt="siterun" src="assets/wordmark-dark.svg#gh-dark-mode-only" width="360">
 </p>
 
 <p align="center"><strong>The simplest way to run WordPress locally.</strong></p>
