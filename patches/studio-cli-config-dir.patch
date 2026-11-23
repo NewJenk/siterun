@@ -1,0 +1,57 @@
+--- a/packages/common/lib/well-known-paths.ts
++++ b/packages/common/lib/well-known-paths.ts
+@@ -2,6 +2,11 @@
+ import path from 'path';
+ 
+ export function getConfigDirectory(): string {
++	// A host app can own the engine's data instead of sharing ~/.studio with a
++	// separately installed Studio. The host sets this for every CLI child.
++	if ( process.env.STUDIO_CONFIG_DIR ) {
++		return process.env.STUDIO_CONFIG_DIR;
++	}
+ 	if ( process.env.DEV_CONFIG_DIR ) {
+ 		return process.env.DEV_CONFIG_DIR;
+ 	}
+--- /dev/null
++++ b/packages/common/lib/tests/well-known-paths.test.ts
+@@ -0,0 +1,40 @@
++import os from 'node:os';
++import path from 'node:path';
++import { afterEach, describe, expect, it } from 'vitest';
++import { getConfigDirectory } from '../well-known-paths';
++
++const originalStudio = process.env.STUDIO_CONFIG_DIR;
++const originalDev = process.env.DEV_CONFIG_DIR;
++
++afterEach( () => {
++	if ( originalStudio === undefined ) {
++		delete process.env.STUDIO_CONFIG_DIR;
++	} else {
++		process.env.STUDIO_CONFIG_DIR = originalStudio;
++	}
++	if ( originalDev === undefined ) {
++		delete process.env.DEV_CONFIG_DIR;
++	} else {
++		process.env.DEV_CONFIG_DIR = originalDev;
++	}
++} );
++
++describe( 'getConfigDirectory', () => {
++	it( 'falls back to ~/.studio', () => {
++		delete process.env.STUDIO_CONFIG_DIR;
++		delete process.env.DEV_CONFIG_DIR;
++		expect( getConfigDirectory() ).toBe( path.join( os.homedir(), '.studio' ) );
++	} );
++
++	it( 'lets a host app own the engine data', () => {
++		process.env.DEV_CONFIG_DIR = '/tmp/dev-studio';
++		process.env.STUDIO_CONFIG_DIR = '/tmp/host-engine';
++		expect( getConfigDirectory() ).toBe( '/tmp/host-engine' );
++	} );
++
++	it( 'still supports the development override', () => {
++		delete process.env.STUDIO_CONFIG_DIR;
++		process.env.DEV_CONFIG_DIR = '/tmp/dev-studio';
++		expect( getConfigDirectory() ).toBe( '/tmp/dev-studio' );
++	} );
++} );

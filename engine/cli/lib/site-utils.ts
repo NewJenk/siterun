@@ -1,0 +1,190 @@
+import { PROXY_PROCESS_NAME } from '@studio/common/constants';
+import { readConfig } from '@studio/common/lib/config/store';
+import { getProxyPortConflictMessage } from '@studio/common/lib/domains';
+import { decodePassword } from '@studio/common/lib/passwords';
+import { SiteCommandLoggerAction as LoggerAction } from '@studio/common/logger-actions';
+import { __ } from '@wordpress/i18n';
+import { openBrowser } from 'cli/lib/browser';
+import { generateSiteCertificate } from 'cli/lib/certificate-manager';
+import { getSiteUrl } from 'cli/lib/cli-config/sites';
+import {
+	isProxyProcessRunning,
+	listProcesses,
+	startProxyProcess,
+	stopProxyProcess,
+} from 'cli/lib/daemon-client';
+import { addDomainToHosts } from 'cli/lib/hosts-file';
+import {
+	isServerRunning,
+	SITE_PROCESS_PREFIX,
+	subscribeForReadyOrExit,
+} from 'cli/lib/wordpress-server-manager';
+import { Logger, LoggerError } from 'cli/logger';
+import type { ConfigSite } from '@studio/common/lib/config/schema';
+
+/**
+ * Starts the HTTP proxy server if it's not already running
+ */
+async function startProxyIfNeeded( logger: Logger< LoggerAction > ): Promise< void > {
+	const proxyProcess = await isProxyProcessRunning();
+	if ( ! proxyProcess ) {
+		logger.reportStart( LoggerAction.START_PROXY, __( 'Starting HTTP proxy server…' ) );
+		const readyOrExit = await subscribeForReadyOrExit( PROXY_PROCESS_NAME );
+		try {
+			const { pmId } = await startProxyProcess();
+			await readyOrExit.waitFor( pmId );
+		} catch ( error ) {
+			throw new LoggerError(
+				getProxyPortConflictMessage( String( error ) ) ?? __( 'Failed to start HTTP proxy server' ),
+				error
+			);
+		} finally {
+			readyOrExit.dispose();
+		}
+		logger.reportSuccess( __( 'HTTP proxy server started' ) );
+	} else {
+		logger.reportSuccess( __( 'HTTP proxy already running' ) );
+	}
+}
+
+/**
+ * Builds a `/studio-auto-login` URL for `siteUrl` that lands on
+ * `redirectTo` (absolute site URL, or omitted for a bare auto-login).
+ * Centralised here so every caller agrees on the query-param shape
+ * the studio-auto-login mu-plugin expects.
+ */
+export function buildAutoLoginUrl( siteUrl: string, redirectTo?: string ): string {
+	const base = `${ siteUrl }/studio-auto-login`;
+	if ( ! redirectTo ) {
+		return base;
+	}
+	return `${ base }?redirect_to=${ encodeURIComponent( redirectTo ) }`;
+}
+
+/**
+ * Opens the site in the browser: the Blueprint `landingPage` when the site has one, logged in so
+ * admin landing pages don't bounce to the login screen, and the front page otherwise.
+ */
+export async function openSiteInBrowser( site: ConfigSite ): Promise< void > {
+	const siteUrl = getSiteUrl( site );
+	try {
+		const url = site.landingPage
+			? buildAutoLoginUrl( siteUrl, new URL( site.landingPage, siteUrl ).toString() )
+			: `${ siteUrl }/`;
+		await openBrowser( url );
+	} catch ( error ) {
+		// Silently fail if browser can't be opened
+	}
+}
+
+/**
+ * Logs site details (URL, username, password) to the console
+ */
+export function logSiteDetails( site: ConfigSite ): void {
+	const siteUrl = getSiteUrl( site );
+	console.log( __( 'Site URL: ' ), siteUrl );
+	console.log( __( 'Username: ' ), site.adminUsername || 'admin' );
+	if ( site.adminPassword ) {
+		console.log( __( 'Password: ' ), decodePassword( site.adminPassword ) );
+	}
+}
+
+/**
+ * Sets up custom domain for a site before starting: proxy server, SSL
+ * certificate and hosts file.
+ *
+ * The caller passes `skipHostsUpdate` when it already handled the hosts file.
+ */
+export async function setupCustomDomain(
+	site: ConfigSite,
+	logger: Logger< LoggerAction >,
+	options?: { skipHostsUpdate?: boolean }
+): Promise< void > {
+	if ( ! site.customDomain ) {
+		return;
+	}
+
+	await startProxyIfNeeded( logger );
+
+	if ( site.enableHttps && ! site.tlsKey && ! site.tlsCert ) {
+		logger.reportStart( LoggerAction.GENERATE_CERT, __( 'Generating SSL certificates…' ) );
+		await generateSiteCertificate( site.customDomain );
+		logger.reportSuccess( __( 'SSL certificates generated' ) );
+	}
+
+	if ( ! options?.skipHostsUpdate ) {
+		logger.reportStart( LoggerAction.ADD_DOMAIN_TO_HOSTS, __( 'Adding domain to hosts file…' ) );
+		try {
+			await addDomainToHosts( site.customDomain, site.port );
+			logger.reportSuccess( __( 'Domain added to hosts file' ) );
+		} catch ( error ) {
+			throw new LoggerError( __( 'Failed to add domain to hosts file' ), error );
+		}
+	}
+}
+
+/**
+ * Stops the HTTP proxy server if no remaining running sites need it.
+ * A site needs the proxy if it has a custom domain configured.
+ *
+ * @param stoppedSiteIds - The ID of the site that was just stopped (to exclude from the check)
+ */
+export async function stopProxyIfNoSitesNeedIt(
+	stoppedSiteIds: string | string[],
+	logger: Logger< LoggerAction >
+): Promise< void > {
+	const stoppedSiteIdsArray = Array.isArray( stoppedSiteIds ) ? stoppedSiteIds : [ stoppedSiteIds ];
+
+	const proxyProcess = await isProxyProcessRunning();
+	if ( ! proxyProcess ) {
+		return;
+	}
+
+	const cliConfig = await readConfig();
+
+	const remainingSitesWithCustomDomains = cliConfig.sites.filter(
+		( site ) => ! stoppedSiteIdsArray.includes( site.id ) && site.customDomain
+	);
+
+	const sitesStillRunning = await Promise.all(
+		remainingSitesWithCustomDomains.map( ( site ) => isServerRunning( site.id ) )
+	);
+
+	if ( sitesStillRunning.some( ( isRunning ) => isRunning ) ) {
+		return;
+	}
+
+	logger.reportStart( LoggerAction.STOP_PROXY, __( 'Stopping HTTP proxy server…' ) );
+	await stopProxyProcess();
+	logger.reportSuccess( __( 'HTTP proxy server stopped' ) );
+}
+
+export async function isSiteRunning( siteId: string ): Promise< boolean > {
+	return ( await getSitesRunningStatus() ).get( siteId ) ?? false;
+}
+
+/**
+ * Whether each saved site is running, by site id, from a single daemon call.
+ */
+export async function getSitesRunningStatus(): Promise< Map< string, boolean > > {
+	let processes: Awaited< ReturnType< typeof listProcesses > >;
+	try {
+		processes = await listProcesses();
+	} catch {
+		// Daemon not running — all sites are stopped.
+		return new Map();
+	}
+
+	// Read after connecting, which can replace an outdated daemon and restart its sites with new pids.
+	const { sites } = await readConfig();
+	return new Map(
+		sites.map( ( site ) => {
+			const processInfo = processes.find(
+				( p ) => p.name === SITE_PROCESS_PREFIX + site.id && p.status === 'online'
+			);
+			const running =
+				!! processInfo && 'pid' in processInfo && processInfo.pid === site.latestCliPid;
+			return [ site.id, running ];
+		} )
+	);
+}

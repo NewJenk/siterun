@@ -1,0 +1,18 @@
+--- a/apps/cli/index.ts
++++ b/apps/cli/index.ts
+@@ -376,6 +376,15 @@
+ 				return eventsCommandHandler( argv.listener );
+ 			},
+ 		} )
++		.command( {
++			command: '_daemon-stop',
++			describe: false, // Hidden command, used by a host app on quit
++			handler: async () => {
++				const { killDaemonAndChildren } = await import( 'cli/lib/daemon-client' );
++				// No daemon is a successful stop; a host app must not fail to quit.
++				await killDaemonAndChildren().catch( () => undefined );
++			},
++		} )
+ 		.demandCommand( 1, __( 'You must provide a valid command' ) )
+ 		.strict();
+ 

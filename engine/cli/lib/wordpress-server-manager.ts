@@ -1,0 +1,676 @@
+/**
+ * WordPress Server Manager for Studio CLI
+ *
+ * Manages WordPress server processes via process manager daemon. Each site runs in a separate
+ * process that serves it with native PHP.
+ */
+import fs from 'fs';
+import path from 'path';
+import {
+	SITE_SERVER_ACTIVITY_CHECK_INTERVAL,
+	SITE_SERVER_INACTIVITY_TIMEOUT,
+	SITE_SERVER_MAX_TIMEOUT,
+} from '@studio/common/constants';
+import { readLastLines } from '@studio/common/lib/fs-utils';
+import { STUDIO_ERROR_LOG_FILENAME } from '@studio/common/lib/mu-plugins';
+import { resolveSupportedPhpVersion } from '@studio/common/lib/php-binary-metadata';
+import { getWpEnvironmentType } from '@studio/common/lib/wp-environment-type';
+import { SiteCommandLoggerAction } from '@studio/common/logger-actions';
+import { __ } from '@wordpress/i18n';
+import { z } from 'zod';
+import { getSiteUrl, updateSiteLatestCliPid } from 'cli/lib/cli-config/sites';
+import {
+	isProcessRunning,
+	startProcess,
+	stopProcess,
+	getDaemonBus,
+	type DaemonBusEventMap,
+	sendMessageToProcess,
+} from 'cli/lib/daemon-client';
+import { ensurePhpBinaryAvailable } from 'cli/lib/dependency-management/php-binary';
+import { isPhpMyAdminSupported } from 'cli/lib/native-php/phpmyadmin';
+import { getSiteDatabasePath, replaceMysql8OnlyCollations } from 'cli/lib/sqlite-collations';
+import { resetSqliteJournalModeToRollback } from 'cli/lib/sqlite-journal-mode';
+import { ProcessDescription, SITE_PROCESS_PREFIX } from 'cli/lib/types/process-manager-ipc';
+import {
+	ServerConfig,
+	ManagerMessagePayload,
+	serverConfigSchema,
+} from 'cli/lib/types/wordpress-server-ipc';
+import { Logger } from 'cli/logger';
+import type { ConfigSite } from '@studio/common/lib/config/schema';
+
+export { SITE_PROCESS_PREFIX };
+
+// Get an abort signal that's triggered on SIGINT/SIGTERM. This is useful for aborting and cleaning
+// up async operations.
+const abortController = new AbortController();
+process.on( 'SIGINT', () => abortController.abort() );
+process.on( 'SIGTERM', () => abortController.abort() );
+
+export function getProcessName( siteId: string ): string {
+	return `${ SITE_PROCESS_PREFIX }${ siteId }`;
+}
+
+const WORDPRESS_SERVER_CHILD_PATH = path.resolve( import.meta.dirname, 'php-server-child.mjs' );
+
+export async function isServerRunning( siteId: string ): Promise< ProcessDescription | undefined > {
+	return isProcessRunning( getProcessName( siteId ) );
+}
+
+const startServerOptionsSchema = serverConfigSchema
+	.pick( {
+		wpVersion: true,
+		siteLanguage: true,
+		autoPrependFile: true,
+		openBasedirAllowList: true,
+	} )
+	.extend( {
+		blueprint: z.unknown().optional(),
+		blueprintUri: z.string().optional(),
+	} );
+
+export type StartServerOptions = z.infer< typeof startServerOptionsSchema >;
+
+function buildServerConfig(
+	site: ConfigSite,
+	options?: Partial< StartServerOptions & SetUpSiteOptions >
+): ServerConfig {
+	const serverConfig: ServerConfig = {
+		siteId: site.id,
+		sitePath: site.path,
+		port: site.port,
+		phpVersion: resolveSupportedPhpVersion( site.phpVersion ),
+		siteTitle: site.name,
+		phpMyAdminSupported: isPhpMyAdminSupported( site ),
+	};
+
+	if ( site.customDomain ) {
+		const protocol = site.enableHttps ? 'https' : 'http';
+		serverConfig.absoluteUrl = `${ protocol }://${ site.customDomain }`;
+	} else if ( process.env.STUDIO_SITE_URL_TEMPLATE ) {
+		serverConfig.absoluteUrl = getSiteUrl( site );
+	}
+
+	if ( site.adminUsername ) {
+		serverConfig.adminUsername = site.adminUsername;
+	}
+
+	if ( site.adminPassword ) {
+		serverConfig.adminPassword = site.adminPassword;
+	}
+
+	if ( site.adminEmail ) {
+		serverConfig.adminEmail = site.adminEmail;
+	}
+
+	if ( site.isWpAutoUpdating !== undefined ) {
+		serverConfig.isWpAutoUpdating = site.isWpAutoUpdating;
+	}
+
+	if ( options?.wpVersion ) {
+		serverConfig.wpVersion = options.wpVersion;
+	}
+
+	if ( options?.siteLanguage ) {
+		serverConfig.siteLanguage = options.siteLanguage;
+	}
+
+	if ( options?.blueprint && options.blueprintUri ) {
+		serverConfig.blueprint = {
+			contents: options.blueprint,
+			uri: options.blueprintUri,
+		};
+	}
+
+	if ( options?.autoPrependFile ) {
+		serverConfig.autoPrependFile = options.autoPrependFile;
+	}
+
+	if ( options?.openBasedirAllowList ) {
+		serverConfig.openBasedirAllowList = options.openBasedirAllowList;
+	}
+
+	if ( site.fileAccess ) {
+		serverConfig.fileAccess = site.fileAccess;
+	}
+
+	if ( site.enableXdebug ) {
+		serverConfig.enableXdebug = true;
+	}
+
+	if ( site.phpWorkers ) {
+		serverConfig.phpWorkers = site.phpWorkers;
+	}
+
+	if ( site.enableDebugLog ) {
+		serverConfig.enableDebugLog = true;
+	}
+
+	if ( site.enableDebugDisplay ) {
+		serverConfig.enableDebugDisplay = true;
+	}
+
+	if ( site.enableScriptDebug ) {
+		serverConfig.enableScriptDebug = true;
+	}
+
+	serverConfig.environmentType = getWpEnvironmentType( site );
+
+	return serverConfig;
+}
+
+async function ensureSitePhpBinaryAvailable(
+	site: ConfigSite,
+	logger: Logger< string >
+): Promise< void > {
+	const phpVersion = resolveSupportedPhpVersion( site.phpVersion );
+	logger.reportStart(
+		SiteCommandLoggerAction.ENSURE_PHP_BINARY,
+		`Checking PHP ${ phpVersion } binary…`
+	);
+	await ensurePhpBinaryAvailable( phpVersion, ( downloaded, total ) => {
+		const dl = ( downloaded / 1024 / 1024 ).toFixed( 1 );
+		const tot = total ? ` / ${ ( total / 1024 / 1024 ).toFixed( 1 ) } MB` : '';
+		logger.reportProgress( `Downloading PHP ${ phpVersion } (${ dl } MB${ tot })` );
+	} );
+}
+
+/**
+ * Start a WordPress server for a site via process manager daemon
+ * 1. Start the process (via the process manager daemon)
+ * 2. Wait for 'ready' message
+ * 3. Send 'start-server' message with config
+ * 4. Wait for response before resolving
+ * 5. Persist the process PID so running-status checks match the live process
+ */
+/** The command that started the site, reported as `command` on `studio_site_start`. */
+export type SiteStartCommand = 'start' | 'create' | 'import' | 'pull' | 'config';
+
+export async function startWordPressServer(
+	site: ConfigSite,
+	logger: Logger< string >,
+	command: SiteStartCommand,
+	options?: StartServerOptions
+): Promise< ProcessDescription > {
+	// For sites imported via `studio pull`, the pull command persists
+	// the computed start options to start-options.json next to its runtime files.
+	if ( ! options && site.runtimeBlueprintPath ) {
+		const optionsPath = path.join(
+			path.dirname( site.runtimeBlueprintPath ),
+			'start-options.json'
+		);
+		if ( fs.existsSync( optionsPath ) ) {
+			options = startServerOptionsSchema.parse(
+				JSON.parse( fs.readFileSync( optionsPath, 'utf-8' ) )
+			);
+		}
+	}
+
+	await ensureSitePhpBinaryAvailable( site, logger );
+
+	const startMessage = options?.blueprint
+		? __( 'Starting WordPress server and applying Blueprint…' )
+		: __( 'Starting WordPress server…' );
+	logger.reportStart( SiteCommandLoggerAction.START_SITE, startMessage );
+
+	const processName = getProcessName( site.id );
+	const serverConfig = buildServerConfig( site, options );
+
+	// The SQLite driver leaves the database in WAL mode, whose shared-memory
+	// index is backed by file locks that fail when several processes open one
+	// site's database at once. Convert it back before the server touches the
+	// file — subprocesses (a WP-CLI process per table during an export) hit this.
+	await resetSqliteJournalModeToRollback( site.path );
+	await replaceMysql8OnlyCollations( site.path );
+	// WordPress installs and Blueprints run during the start below and can create new tables.
+	const mayCreateTablesDuringStart =
+		! fs.existsSync( getSiteDatabasePath( site.path ) ) || Boolean( options?.blueprint );
+
+	await clearStudioErrorLog( site );
+	const phpErrorLogPath = path.join(
+		site.path,
+		'wp-content',
+		site.enableDebugLog ? 'debug.log' : STUDIO_ERROR_LOG_FILENAME
+	);
+	const phpErrorLogSizeAtStart = await fileSize( phpErrorLogPath );
+
+	const readyOrExit = await subscribeForReadyOrExit( processName );
+	let processStarted = false;
+	try {
+		const processDesc = await startProcess( processName, WORDPRESS_SERVER_CHILD_PATH );
+		processStarted = true;
+		await readyOrExit.waitFor( processDesc.pmId );
+		await sendMessage(
+			processDesc.pmId,
+			processName,
+			{
+				topic: 'start-server',
+				data: { config: serverConfig },
+			},
+			{ logger }
+		);
+
+		if ( mayCreateTablesDuringStart ) {
+			await replaceMysql8OnlyCollations( site.path );
+		}
+
+		if ( processDesc.status === 'online' ) {
+			await updateSiteLatestCliPid( site.id, processDesc.pid );
+		}
+		return processDesc;
+	} catch ( error ) {
+		// A start that timed out leaves its process behind, so the site would look running while
+		// nothing serves it, and the next start would report it as already running.
+		if ( processStarted ) {
+			await stopWordPressServer( site.id ).catch( () => {} );
+		}
+		throw await withCapturedPhpErrors( error, phpErrorLogPath, phpErrorLogSizeAtStart );
+	} finally {
+		readyOrExit.dispose();
+	}
+}
+
+async function clearStudioErrorLog( site: ConfigSite ): Promise< void > {
+	const logPath = path.join( site.path, 'wp-content', STUDIO_ERROR_LOG_FILENAME );
+	await fs.promises.rm( logPath, { force: true } ).catch( () => undefined );
+}
+
+async function fileSize( filePath: string ): Promise< number > {
+	try {
+		return ( await fs.promises.stat( filePath ) ).size;
+	} catch {
+		return 0;
+	}
+}
+
+const PHP_ERROR_TAIL_MAX_LINES = 50;
+
+// Appends the PHP errors recorded during this start attempt to the failure, so
+// users see why WordPress died instead of just "process exited..." (STU-1757).
+async function withCapturedPhpErrors(
+	error: unknown,
+	logPath: string,
+	sizeAtStart: number
+): Promise< unknown > {
+	if (
+		! ( error instanceof Error ) ||
+		error.name === 'AbortError' ||
+		error.message === 'Operation aborted'
+	) {
+		return error;
+	}
+
+	// Only surface errors this attempt appended — debug.log isn't cleared and may
+	// hold entries from previous runs.
+	if ( ( await fileSize( logPath ) ) <= sizeAtStart ) {
+		return error;
+	}
+	const lines = readLastLines( logPath, PHP_ERROR_TAIL_MAX_LINES );
+	if ( lines?.length ) {
+		error.message += `\nRecent PHP errors (${ logPath }):\n${ lines.join( '\n' ) }`;
+	}
+
+	return error;
+}
+
+function buildChildExitedError( processName: string, stderrTail?: string ): Error {
+	let message = `Server child process "${ processName }" exited before becoming ready.`;
+	if ( stderrTail?.trim() ) {
+		message += `\n${ stderrTail.trimEnd() }`;
+	}
+	return new Error( message );
+}
+
+/**
+ * Attaches listeners to the daemon bus *before* the child process is started so we cannot miss
+ * an early `ready` or `exit` event. Events that arrive before the caller knows the pmId are
+ * buffered (filtered by processName) and replayed once `waitFor(pmId)` is called.
+ * Must be disposed via `dispose()` when done.
+ */
+export async function subscribeForReadyOrExit( processName: string ): Promise< {
+	waitFor: ( pmId: number ) => Promise< void >;
+	dispose: () => void;
+} > {
+	const bus = await getDaemonBus();
+
+	const pendingReady: Array< DaemonBusEventMap[ 'process-message' ] > = [];
+	const pendingExits: Array< DaemonBusEventMap[ 'process-event' ] > = [];
+	let onReady: () => void = () => {};
+	let onExit: ( stderrTail?: string ) => void = () => {};
+	let waiting = false;
+
+	const messageHandler = ( packet: DaemonBusEventMap[ 'process-message' ] ) => {
+		if ( packet.process.name !== processName || packet.raw.topic !== 'ready' ) {
+			return;
+		}
+		if ( waiting ) {
+			onReady();
+		} else {
+			pendingReady.push( packet );
+		}
+	};
+	const eventHandler = ( event: DaemonBusEventMap[ 'process-event' ] ) => {
+		if ( event.process.name !== processName || event.event !== 'exit' ) {
+			return;
+		}
+		if ( waiting ) {
+			onExit( event.stderrTail );
+		} else {
+			pendingExits.push( event );
+		}
+	};
+
+	bus.on( 'process-message', messageHandler );
+	bus.on( 'process-event', eventHandler );
+
+	const waitFor = ( pmId: number ): Promise< void > => {
+		waiting = true;
+
+		let timeoutId: NodeJS.Timeout;
+		let abortListener: () => void;
+
+		return new Promise< void >( ( resolve, reject ) => {
+			timeoutId = setTimeout( () => {
+				reject( new Error( 'Timeout waiting for ready message from server child process' ) );
+			}, SITE_SERVER_INACTIVITY_TIMEOUT );
+			abortListener = () => {
+				reject( new Error( 'Operation aborted' ) );
+			};
+
+			onReady = () => resolve();
+			onExit = ( stderrTail ) => reject( buildChildExitedError( processName, stderrTail ) );
+
+			abortController.signal.addEventListener( 'abort', abortListener );
+
+			// Replay any events we buffered before pmId was known.
+			const bufferedExit = pendingExits.find( ( event ) => event.process.pm_id === pmId );
+			if ( bufferedExit ) {
+				onExit( bufferedExit.stderrTail );
+				return;
+			}
+			const bufferedReady = pendingReady.find( ( packet ) => packet.process.pm_id === pmId );
+			if ( bufferedReady ) {
+				onReady();
+			}
+		} ).finally( () => {
+			clearTimeout( timeoutId );
+			abortController.signal.removeEventListener( 'abort', abortListener );
+			// Release per-call handlers; the bus listeners stay until dispose().
+			onReady = () => {};
+			onExit = () => {};
+			waiting = false;
+		} );
+	};
+
+	const dispose = () => {
+		bus.off( 'process-message', messageHandler );
+		bus.off( 'process-event', eventHandler );
+	};
+
+	return { waitFor, dispose };
+}
+
+const messageActivityTrackers = new Map<
+	string,
+	{
+		activityCheckIntervalId: NodeJS.Timeout;
+	}
+>();
+const CHILD_EXIT_ERROR_GRACE_MS = 100;
+
+interface SendMessageOptions {
+	maxTotalElapsedTime?: number;
+	logger?: Logger< string >;
+}
+
+/**
+ * Send message to process (via the process manager daemon) and wait for response with
+ * activity-based timeout.
+ * - Keeps the last activity timestamp
+ * - Checks periodically for inactivity
+ * - Has both inactivity timeout and max total timeout
+ */
+async function sendMessage(
+	pmId: number,
+	processName: string,
+	message: ManagerMessagePayload,
+	options: SendMessageOptions = {}
+): Promise< unknown > {
+	const { maxTotalElapsedTime = SITE_SERVER_MAX_TIMEOUT, logger } = options;
+	const bus = await getDaemonBus();
+	const messageId = crypto.randomUUID();
+	let responseHandler: ( packet: DaemonBusEventMap[ 'process-message' ] ) => void;
+	let processEventHandler: ( event: DaemonBusEventMap[ 'process-event' ] ) => void;
+	let abortListener: () => void;
+	let exitRejectTimeoutId: NodeJS.Timeout | undefined;
+
+	return new Promise( ( resolve, reject ) => {
+		const startTime = Date.now();
+		let lastActivityTimestamp = Date.now();
+
+		const activityCheckIntervalId = setInterval( () => {
+			const now = Date.now();
+			const timeSinceLastActivity = now - lastActivityTimestamp;
+			const totalElapsedTime = now - startTime;
+
+			if (
+				timeSinceLastActivity > SITE_SERVER_INACTIVITY_TIMEOUT ||
+				totalElapsedTime > maxTotalElapsedTime
+			) {
+				const timeoutReason =
+					totalElapsedTime > maxTotalElapsedTime
+						? `Maximum timeout of ${ maxTotalElapsedTime / 1000 }s exceeded`
+						: `No activity for ${ SITE_SERVER_INACTIVITY_TIMEOUT / 1000 }s`;
+				reject(
+					new Error(
+						`Timeout waiting for response to message ${ message.topic }: ${ timeoutReason }`
+					)
+				);
+			}
+		}, SITE_SERVER_ACTIVITY_CHECK_INTERVAL );
+
+		messageActivityTrackers.set( messageId, {
+			activityCheckIntervalId,
+		} );
+
+		processEventHandler = ( event ) => {
+			if ( event.process.name === processName && event.event === 'exit' ) {
+				exitRejectTimeoutId = setTimeout( () => {
+					let errorMessage = 'WordPress server process exited unexpectedly';
+					if ( event.stderrTail?.trim() ) {
+						errorMessage += `\n${ event.stderrTail.trimEnd() }`;
+					}
+					reject( new Error( errorMessage ) );
+				}, CHILD_EXIT_ERROR_GRACE_MS );
+			}
+		};
+
+		responseHandler = ( packet ) => {
+			if ( packet.process.pm_id !== pmId ) {
+				return;
+			}
+
+			if ( packet.raw.topic === 'activity' ) {
+				lastActivityTimestamp = Date.now();
+			} else if ( packet.raw.topic === 'console-message' ) {
+				lastActivityTimestamp = Date.now();
+				logger?.reportProgress( packet.raw.message );
+			} else if (
+				packet.raw.topic === 'start-phase' &&
+				packet.raw.originalMessageId === messageId
+			) {
+				// A finished step is progress, so a slow start that keeps finishing steps isn't cut off.
+				lastActivityTimestamp = Date.now();
+			} else if ( packet.raw.topic === 'error' && packet.raw.originalMessageId === messageId ) {
+				if ( exitRejectTimeoutId ) {
+					clearTimeout( exitRejectTimeoutId );
+					exitRejectTimeoutId = undefined;
+				}
+				const error = new Error( packet.raw.errorMessage );
+				if ( packet.raw.errorStack ) {
+					error.stack = packet.raw.errorStack;
+				}
+				reject( error );
+			} else if ( packet.raw.topic === 'result' && packet.raw.originalMessageId === messageId ) {
+				if ( exitRejectTimeoutId ) {
+					clearTimeout( exitRejectTimeoutId );
+					exitRejectTimeoutId = undefined;
+				}
+				resolve( packet.raw.result );
+			}
+		};
+
+		abortListener = () => {
+			void sendMessageToProcess( pmId, { messageId, topic: 'abort', data: {} } );
+			reject( new Error( 'Operation aborted' ) );
+		};
+		abortController.signal.addEventListener( 'abort', abortListener );
+
+		bus.on( 'process-event', processEventHandler );
+		bus.on( 'process-message', responseHandler );
+
+		sendMessageToProcess( pmId, { ...message, messageId } ).catch( reject );
+	} ).finally( () => {
+		abortController.signal.removeEventListener( 'abort', abortListener );
+		bus.off( 'process-event', processEventHandler );
+		bus.off( 'process-message', responseHandler );
+
+		const tracker = messageActivityTrackers.get( messageId );
+		if ( tracker ) {
+			clearInterval( tracker.activityCheckIntervalId );
+			messageActivityTrackers.delete( messageId );
+		}
+		if ( exitRejectTimeoutId ) {
+			clearTimeout( exitRejectTimeoutId );
+		}
+	} );
+}
+
+const GRACEFUL_STOP_TIMEOUT = 5000;
+
+export async function stopWordPressServer( siteId: string ): Promise< void > {
+	const processName = getProcessName( siteId );
+	const runningProcess = await isProcessRunning( processName );
+
+	if ( ! runningProcess ) {
+		return;
+	}
+
+	try {
+		const bus = await getDaemonBus();
+		let busExitEventListener: ( event: DaemonBusEventMap[ 'process-event' ] ) => void;
+
+		const exitPromise = new Promise< void >( ( resolve ) => {
+			busExitEventListener = ( event: DaemonBusEventMap[ 'process-event' ] ) => {
+				if ( event.process.name === processName && event.event === 'exit' ) {
+					resolve();
+				}
+			};
+
+			bus.on( 'process-event', busExitEventListener );
+		} ).finally( () => {
+			bus.off( 'process-event', busExitEventListener );
+		} );
+
+		await sendMessage(
+			runningProcess.pmId,
+			processName,
+			{ topic: 'stop-server', data: {} },
+			{ maxTotalElapsedTime: GRACEFUL_STOP_TIMEOUT }
+		);
+
+		// Allow 5 seconds (arbitrary number) of cleanup time for the child process before throwing an
+		// exception and telling the process manager to send a SIGKILL signal. Clear the timer once the
+		// race settles, or it keeps the CLI process alive for the full 5 seconds.
+		let exitTimeout: NodeJS.Timeout | undefined;
+		try {
+			await Promise.race( [
+				exitPromise,
+				new Promise( ( resolve, reject ) => {
+					exitTimeout = setTimeout(
+						() => reject( new Error( 'Timed out waiting for the server to stop' ) ),
+						GRACEFUL_STOP_TIMEOUT
+					);
+				} ),
+			] );
+		} finally {
+			clearTimeout( exitTimeout );
+		}
+	} catch {
+		await stopProcess( processName );
+		// SIGKILL is asynchronous: the daemon returns before the OS has torn the
+		// process down. Callers restart the server immediately after this resolves,
+		// and on Windows a lingering handle on the site's SQLite file makes that
+		// restart fail to connect, so wait for the process to actually be gone.
+		await waitForProcessToExit( processName );
+	}
+}
+
+const PROCESS_EXIT_POLL_INTERVAL = 100;
+const PROCESS_EXIT_TIMEOUT = 5000;
+
+/**
+ * Polls the daemon until the named process is no longer running.
+ *
+ * Resolves (rather than throwing) if the process is still listed once the
+ * timeout elapses: it has already been SIGKILLed, so failing the stop here
+ * would only turn a slow teardown into a user-visible error.
+ */
+async function waitForProcessToExit( processName: string ): Promise< void > {
+	const deadline = Date.now() + PROCESS_EXIT_TIMEOUT;
+
+	while ( Date.now() < deadline ) {
+		if ( ! ( await isProcessRunning( processName ) ) ) {
+			return;
+		}
+		await new Promise( ( resolve ) => setTimeout( resolve, PROCESS_EXIT_POLL_INTERVAL ) );
+	}
+}
+
+export interface SetUpSiteOptions {
+	wpVersion?: string;
+	blueprint?: unknown;
+	blueprintUri?: string;
+	siteLanguage?: string;
+}
+
+/**
+ * Set a site up without starting a server: write wp-config.php, install WordPress, and apply the
+ * Blueprint when one is given. Runs in a server child process that stops once it is done.
+ */
+export async function setUpSite(
+	site: ConfigSite,
+	logger: Logger< string >,
+	options: SetUpSiteOptions
+): Promise< void > {
+	await ensureSitePhpBinaryAvailable( site, logger );
+	logger.reportStart(
+		SiteCommandLoggerAction.APPLY_BLUEPRINT,
+		options.blueprint ? __( 'Applying Blueprint…' ) : __( 'Setting up WordPress…' )
+	);
+
+	const processName = getProcessName( site.id );
+	const serverConfig = buildServerConfig( site, options );
+
+	const readyOrExit = await subscribeForReadyOrExit( processName );
+	try {
+		const processDesc = await startProcess( processName, WORDPRESS_SERVER_CHILD_PATH );
+		try {
+			await readyOrExit.waitFor( processDesc.pmId );
+			await sendMessage(
+				processDesc.pmId,
+				processName,
+				{
+					topic: 'set-up-site',
+					data: { config: serverConfig },
+				},
+				{ logger }
+			);
+		} finally {
+			await stopProcess( processName );
+		}
+	} finally {
+		readyOrExit.dispose();
+	}
+}

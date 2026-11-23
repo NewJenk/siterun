@@ -1,0 +1,151 @@
+import { readConfig, updateConfig } from '@studio/common/lib/config/store';
+import { SiteCommandLoggerAction as LoggerAction } from '@studio/common/logger-actions';
+import { __, _n, sprintf } from '@wordpress/i18n';
+import { clearSiteLatestCliPid, getSiteByFolder } from 'cli/lib/cli-config/sites';
+import {
+	connectToDaemon,
+	disconnectFromDaemon,
+	killDaemonAndChildren,
+} from 'cli/lib/daemon-client';
+import { getSiteDetails } from 'cli/lib/site-details';
+import { withSiteOperation } from 'cli/lib/site-operations';
+import { stopProxyIfNoSitesNeedIt } from 'cli/lib/site-utils';
+import {
+	isServerRunning,
+	stopWordPressServer,
+} from 'cli/lib/wordpress-server-manager';
+import { Logger, LoggerError } from 'cli/logger';
+import type { ConfigSite } from '@studio/common/lib/config/schema';
+import type { builder } from 'cli/commands/site/stop.command';
+import type { CommandArgs } from 'cli/types';
+
+const defaultLogger = new Logger< LoggerAction >();
+
+export enum Mode {
+	STOP_SINGLE_SITE,
+	STOP_ALL_SITES,
+}
+
+export async function runCommand(
+	target: Mode.STOP_SINGLE_SITE,
+	siteFolder: string,
+	logger?: Logger< LoggerAction >
+): Promise< void >;
+export async function runCommand(
+	target: Mode.STOP_ALL_SITES,
+	siteFolder: undefined,
+	logger?: Logger< LoggerAction >
+): Promise< void >;
+export async function runCommand(
+	target: Mode,
+	siteFolder: string | undefined,
+	logger: Logger< LoggerAction > = defaultLogger
+): Promise< void > {
+	// Stopping everything is the quit path — it kills the daemon outright, so
+	// there is no per-site operation to take (and taking one for every site could
+	// block on an operation this is about to terminate anyway).
+	if ( target === Mode.STOP_SINGLE_SITE && siteFolder ) {
+		return withSiteOperation( siteFolder, 'stop', () => stopSites( target, siteFolder, logger ) );
+	}
+	return stopSites( target, siteFolder, logger );
+}
+
+async function stopSites(
+	target: Mode,
+	siteFolder: string | undefined,
+	logger: Logger< LoggerAction >
+): Promise< void > {
+	try {
+		await connectToDaemon();
+
+		if ( target === Mode.STOP_SINGLE_SITE && siteFolder ) {
+			const site = await getSiteByFolder( siteFolder );
+
+			const runningProcess = await isServerRunning( site.id );
+			if ( ! runningProcess ) {
+				logger.reportSuccess( __( 'WordPress server is not running' ) );
+				return;
+			}
+
+			logger.reportStart( LoggerAction.STOP_SITE, __( 'Stopping WordPress server…' ) );
+
+			try {
+				await stopWordPressServer( site.id );
+				await clearSiteLatestCliPid( site.id );
+				logger.reportSuccess( __( 'WordPress server stopped' ) );
+				await stopProxyIfNoSitesNeedIt( site.id, logger );
+			} catch ( error ) {
+				throw new LoggerError( __( 'Failed to stop WordPress server' ), error );
+			}
+		} else {
+			const cliConfig = await readConfig();
+			const runningSites: ConfigSite[] = [];
+
+			for ( const site of cliConfig.sites ) {
+				const runningProcess = await isServerRunning( site.id );
+
+				if ( runningProcess ) {
+					runningSites.push( site );
+				}
+			}
+
+			if ( ! runningSites.length ) {
+				await killDaemonAndChildren();
+				logger.reportSuccess( __( 'No sites are currently running' ) );
+			} else {
+				await updateConfig( ( cliConfig ) => {
+					for ( const site of cliConfig.sites ) {
+						if ( runningSites.find( ( r ) => r.id === site.id ) ) {
+							delete site.latestCliPid;
+						}
+					}
+				} );
+
+				logger.reportStart( LoggerAction.STOP_ALL_SITES, __( 'Stopping all WordPress servers…' ) );
+
+				await killDaemonAndChildren();
+				logger.reportSuccess(
+					sprintf(
+						_n(
+							'Successfully stopped %d site',
+							'Successfully stopped %d sites',
+							runningSites.length
+						),
+						runningSites.length
+					)
+				);
+
+				// One event per stopped site, with the count of sites still running afterwards — the
+				// daemon is down here, so it decrements to 0 across the batch.
+				for ( let index = 0; index < runningSites.length; index++ ) {
+				}
+			}
+		}
+	} finally {
+		await disconnectFromDaemon();
+	}
+}
+export async function commandHandler( argv: CommandArgs< typeof builder > ) {
+	try {
+		if ( argv.all ) {
+			await runCommand( Mode.STOP_ALL_SITES, undefined );
+		} else {
+			await runCommand( Mode.STOP_SINGLE_SITE, argv.path );
+			// Read after the operation is released, so Studio can show the site as it now is.
+			defaultLogger.reportResult( {
+				...getSiteDetails( await getSiteByFolder( argv.path ) ),
+				running: false,
+			} );
+		}
+	} catch ( error ) {
+		if ( error instanceof LoggerError ) {
+			defaultLogger.reportError( error );
+		} else {
+			const loggerError = new LoggerError(
+				argv.all ? __( 'Failed to stop sites' ) : __( 'Failed to stop site' ),
+				error
+			);
+			defaultLogger.reportError( loggerError );
+		}
+	}
+}

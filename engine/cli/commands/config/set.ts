@@ -1,0 +1,576 @@
+import path from 'node:path';
+import { DEFAULT_WORDPRESS_VERSION } from '@studio/common/constants';
+import { SITE_EVENTS } from '@studio/common/lib/cli-events';
+import { readConfig, updateConfig } from '@studio/common/lib/config/store';
+import { getDomainNameValidationError } from '@studio/common/lib/domains';
+import { arePathsEqual, pathExists, recursiveCopyDirectory } from '@studio/common/lib/fs-utils';
+import {
+	encodePassword,
+	validateAdminEmail,
+	validateAdminUsername,
+} from '@studio/common/lib/passwords';
+import {
+	getSiteFileAccess,
+	siteFileAccessSchema,
+	SITE_FILE_ACCESS_ALL_FILES,
+	SITE_FILE_ACCESS_SITE_DIRECTORY,
+	type SiteFileAccess,
+} from '@studio/common/lib/site-file-access';
+import { siteNeedsRestart } from '@studio/common/lib/site-needs-restart';
+import {
+	DEFAULT_SITE_PHP_WORKERS,
+	getSitePhpWorkers,
+	sitePhpWorkersSchema,
+} from '@studio/common/lib/site-php-workers';
+import { getWordPressVersionUrl } from '@studio/common/lib/wordpress-version-utils';
+import {
+	getWpEnvironmentType,
+	wpEnvironmentTypeSchema,
+	WP_ENVIRONMENT_TYPES,
+	type WpEnvironmentType,
+} from '@studio/common/lib/wp-environment-type';
+import { SiteCommandLoggerAction as LoggerAction } from '@studio/common/logger-actions';
+import { SupportedPHPVersions } from '@studio/common/types/php-versions';
+import { __, sprintf } from '@wordpress/i18n';
+import { generateSiteCertificate } from 'cli/lib/certificate-manager';
+import { getSiteByFolder } from 'cli/lib/cli-config/sites';
+import { connectToDaemon, disconnectFromDaemon, emitCliEvent } from 'cli/lib/daemon-client';
+import { getWordPressVersionPath } from 'cli/lib/dependency-management/paths';
+import { downloadWordPress } from 'cli/lib/dependency-management/wordpress';
+import { updateDomainInHosts } from 'cli/lib/hosts-file';
+import { validateSupportedPhpVersion } from 'cli/lib/php-versions';
+import { runWpCliCommand } from 'cli/lib/run-wp-cli-command';
+import { withSiteOperation } from 'cli/lib/site-operations';
+import { setupCustomDomain } from 'cli/lib/site-utils';
+import {
+	isServerRunning,
+	startWordPressServer,
+	stopWordPressServer,
+} from 'cli/lib/wordpress-server-manager';
+import { summarizeWpCliStderr } from 'cli/lib/wp-cli-stderr';
+import { coerceWpVersionOption, getWpVersionOptionDescription } from 'cli/lib/wp-version-option';
+import { Logger, LoggerError } from 'cli/logger';
+import { StudioArgv } from 'cli/types';
+import type { ConfigSite } from '@studio/common/lib/config/schema';
+
+const logger = new Logger< LoggerAction >();
+
+export interface SetCommandOptions {
+	name?: string;
+	domain?: string;
+	https?: boolean;
+	php?: string;
+	wp?: string;
+	fileAccess?: SiteFileAccess;
+	xdebug?: boolean;
+	phpWorkers?: number;
+	adminUsername?: string;
+	adminPassword?: string;
+	adminEmail?: string;
+	debugLog?: boolean;
+	debugDisplay?: boolean;
+	scriptDebug?: boolean;
+	environmentType?: WpEnvironmentType;
+}
+
+// Installing WordPress writes wp-config.php and creates the database. A site with neither (one an
+// older `site create --no-start` left) can't boot WP-CLI. Pulled/imported sites keep their config
+// outside the site directory, so they never count as unprovisioned.
+async function isUnprovisionedSite( site: ConfigSite ): Promise< boolean > {
+	if ( site.runtimeBlueprintPath ) {
+		return false;
+	}
+	const [ hasConfig, hasDatabase ] = await Promise.all( [
+		pathExists( path.join( site.path, 'wp-config.php' ) ),
+		pathExists( path.join( site.path, 'wp-content', 'database', '.ht.sqlite' ) ),
+	] );
+	return ! hasConfig && ! hasDatabase;
+}
+
+async function setWordPressVersion( site: ConfigSite, wp: string ): Promise< void > {
+	// Swap the core files like `site create --wp` does; the installer runs on the first start.
+	// Installing up front instead would leave a newer DB schema than the code on a downgrade.
+	if ( await isUnprovisionedSite( site ) ) {
+		await downloadWordPress( wp );
+		await recursiveCopyDirectory( getWordPressVersionPath( wp ), site.path );
+		return;
+	}
+
+	await using command = await runWpCliCommand( site, [
+		'core',
+		'update',
+		getWordPressVersionUrl( wp ),
+		'--force',
+		'--skip-plugins',
+		'--skip-themes',
+	] );
+
+	if ( ( await command.response.exitCode ) === 0 ) {
+		return;
+	}
+
+	const message = sprintf( __( 'Failed to update WordPress version to %s' ), wp );
+	const output =
+		( await command.response.stderrText ).trim() || ( await command.response.stdoutText ).trim();
+	if ( ! output ) {
+		throw new LoggerError( message );
+	}
+	console.error( message, output );
+	throw new LoggerError( message, new Error( summarizeWpCliStderr( output ) ) );
+}
+
+export async function runCommand( sitePath: string, options: SetCommandOptions ): Promise< void > {
+	const validated = validateSetOptions( options );
+	return withSiteOperation( sitePath, 'settings', () => setSiteConfig( sitePath, validated ) );
+}
+
+// Runs before the operation is recorded, so an invalid edit fails without
+// touching the config file or briefly blocking the site. Returns the
+// options with `adminEmail` normalized (blank means "leave it alone").
+function validateSetOptions( options: SetCommandOptions ): SetCommandOptions {
+	const {
+		name,
+		domain,
+		https,
+		php,
+		wp,
+		fileAccess,
+		xdebug,
+		phpWorkers,
+		adminUsername,
+		adminPassword,
+		debugLog,
+		debugDisplay,
+		scriptDebug,
+		environmentType,
+	} = options;
+	let { adminEmail } = options;
+
+	if (
+		name === undefined &&
+		domain === undefined &&
+		https === undefined &&
+		php === undefined &&
+		wp === undefined &&
+		fileAccess === undefined &&
+		xdebug === undefined &&
+		phpWorkers === undefined &&
+		adminUsername === undefined &&
+		adminPassword === undefined &&
+		adminEmail === undefined &&
+		debugLog === undefined &&
+		debugDisplay === undefined &&
+		scriptDebug === undefined &&
+		environmentType === undefined
+	) {
+		throw new LoggerError(
+			__(
+				'At least one option (--name, --domain, --https, --php, --wp, --file-access, --xdebug, --php-workers, --admin-username, --admin-password, --admin-email, --debug-log, --debug-display, --script-debug, --environment-type) is required.'
+			)
+		);
+	}
+
+	if ( phpWorkers !== undefined && ! sitePhpWorkersSchema.safeParse( phpWorkers ).success ) {
+		throw new LoggerError( __( 'PHP workers must be a whole number from 1 to 64.' ) );
+	}
+
+	if ( name !== undefined && ! name.trim() ) {
+		throw new LoggerError( __( 'Site name cannot be empty.' ) );
+	}
+
+	if ( adminUsername !== undefined ) {
+		const usernameError = validateAdminUsername( adminUsername );
+		if ( usernameError ) {
+			throw new LoggerError( usernameError );
+		}
+	}
+
+	if ( adminPassword !== undefined && ! adminPassword.trim() ) {
+		throw new LoggerError( __( 'Admin password cannot be empty.' ) );
+	}
+
+	if ( options.php !== undefined ) {
+		validateSupportedPhpVersion( options.php );
+	}
+
+	if ( adminEmail !== undefined ) {
+		if ( ! adminEmail.trim() ) {
+			adminEmail = undefined;
+		} else {
+			const emailError = validateAdminEmail( adminEmail );
+			if ( emailError ) {
+				throw new LoggerError( emailError );
+			}
+		}
+	}
+
+	return { ...options, adminEmail };
+}
+
+async function setSiteConfig( sitePath: string, options: SetCommandOptions ): Promise< void > {
+	const {
+		name,
+		domain,
+		https,
+		php,
+		wp,
+		fileAccess,
+		xdebug,
+		phpWorkers,
+		adminUsername,
+		adminPassword,
+		adminEmail,
+		debugLog,
+		debugDisplay,
+		scriptDebug,
+		environmentType,
+	} = options;
+
+	try {
+		logger.reportStart( LoggerAction.LOAD_SITES, __( 'Loading site…' ) );
+		let site = await getSiteByFolder( sitePath );
+		logger.reportSuccess( __( 'Site loaded' ) );
+
+		const validatedPhp = php === undefined ? undefined : validateSupportedPhpVersion( php );
+
+		const initialCliConfig = await readConfig();
+
+		if ( domain ) {
+			const existingDomainNames = initialCliConfig.sites
+				.filter( ( s ) => s.id !== site.id )
+				.map( ( s ) => s.customDomain )
+				.filter( ( d ): d is string => Boolean( d ) );
+			const domainError = getDomainNameValidationError( true, domain, existingDomainNames );
+			if ( domainError ) {
+				throw new LoggerError( domainError );
+			}
+		}
+
+		if ( https === true ) {
+			const effectiveDomain = domain ?? site.customDomain;
+			if ( ! effectiveDomain ) {
+				throw new LoggerError( __( 'HTTPS requires a custom domain. Use --domain to set one.' ) );
+			}
+		}
+
+		if ( xdebug === true ) {
+			const otherXdebugSite = initialCliConfig.sites.find(
+				( s ) => s.enableXdebug && s.id !== site.id
+			);
+			if ( otherXdebugSite ) {
+				throw new LoggerError(
+					sprintf(
+						/* translators: %s: site name */
+						__( 'Only one site can have Xdebug enabled at a time. Disable Xdebug on "%s" first.' ),
+						otherXdebugSite.name
+					)
+				);
+			}
+		}
+
+		const nameChanged = name !== undefined && name !== site.name;
+		const domainChanged = domain !== undefined && domain !== site.customDomain;
+		const httpsChanged = https !== undefined && https !== site.enableHttps;
+		const phpChanged = validatedPhp !== undefined && validatedPhp !== site.phpVersion;
+		const wpChanged = wp !== undefined;
+		const fileAccessChanged = fileAccess !== undefined && fileAccess !== getSiteFileAccess( site );
+		const xdebugChanged = xdebug !== undefined && xdebug !== site.enableXdebug;
+		const phpWorkersChanged = phpWorkers !== undefined && phpWorkers !== getSitePhpWorkers( site );
+		const adminUsernameChanged =
+			adminUsername !== undefined && adminUsername !== ( site.adminUsername ?? 'admin' );
+		const adminPasswordChanged = adminPassword !== undefined;
+		const adminEmailChanged = adminEmail !== undefined && adminEmail !== ( site.adminEmail ?? '' );
+		const credentialsChanged = adminUsernameChanged || adminPasswordChanged || adminEmailChanged;
+		const debugLogChanged = debugLog !== undefined && debugLog !== site.enableDebugLog;
+		const debugDisplayChanged =
+			debugDisplay !== undefined && debugDisplay !== site.enableDebugDisplay;
+		const scriptDebugChanged = scriptDebug !== undefined && scriptDebug !== site.enableScriptDebug;
+		const environmentTypeChanged =
+			environmentType !== undefined && environmentType !== getWpEnvironmentType( site );
+
+		const hasChanges =
+			nameChanged ||
+			domainChanged ||
+			httpsChanged ||
+			phpChanged ||
+			wpChanged ||
+			fileAccessChanged ||
+			xdebugChanged ||
+			phpWorkersChanged ||
+			credentialsChanged ||
+			debugLogChanged ||
+			debugDisplayChanged ||
+			scriptDebugChanged ||
+			environmentTypeChanged;
+		if ( ! hasChanges ) {
+			throw new LoggerError(
+				__( 'No changes to apply. The site already has the specified settings.' )
+			);
+		}
+
+		const needsRestart = siteNeedsRestart( {
+			domainChanged,
+			httpsChanged,
+			phpChanged,
+			wpChanged,
+			fileAccessChanged,
+			xdebugChanged,
+			phpWorkersChanged,
+			credentialsChanged,
+			debugLogChanged,
+			debugDisplayChanged,
+			scriptDebugChanged,
+			environmentTypeChanged,
+		} );
+		const oldDomain = site.customDomain;
+		const previousCredentials = {
+			adminUsername: site.adminUsername,
+			adminPassword: site.adminPassword,
+			adminEmail: site.adminEmail,
+		};
+
+		await updateConfig( ( cliConfig ) => {
+			const foundSite = cliConfig.sites.find( ( s ) => arePathsEqual( s.path, sitePath ) );
+			if ( ! foundSite ) {
+				throw new LoggerError( __( 'The specified directory is not added to Studio.' ) );
+			}
+
+			if ( nameChanged ) {
+				foundSite.name = name!;
+			}
+			if ( domainChanged ) {
+				foundSite.customDomain = domain || undefined;
+			}
+			if ( httpsChanged ) {
+				foundSite.enableHttps = https;
+			}
+			if ( phpChanged ) {
+				foundSite.phpVersion = validatedPhp!;
+			}
+			if ( fileAccessChanged ) {
+				foundSite.fileAccess = fileAccess;
+			}
+			if ( xdebugChanged ) {
+				foundSite.enableXdebug = xdebug;
+			}
+			if ( phpWorkersChanged ) {
+				foundSite.phpWorkers = phpWorkers;
+			}
+			if ( adminUsernameChanged ) {
+				foundSite.adminUsername = adminUsername!;
+			}
+			if ( adminPasswordChanged ) {
+				foundSite.adminPassword = encodePassword( adminPassword! );
+			}
+			if ( adminEmailChanged ) {
+				foundSite.adminEmail = adminEmail!;
+			}
+			if ( debugLogChanged ) {
+				foundSite.enableDebugLog = debugLog;
+			}
+			if ( debugDisplayChanged ) {
+				foundSite.enableDebugDisplay = debugDisplay;
+			}
+			if ( scriptDebugChanged ) {
+				foundSite.enableScriptDebug = scriptDebug;
+			}
+			if ( environmentTypeChanged ) {
+				foundSite.environmentType = environmentType;
+			}
+
+			site = foundSite;
+		} );
+
+		if ( domainChanged ) {
+			logger.reportStart( LoggerAction.ADD_DOMAIN_TO_HOSTS, __( 'Updating hosts file…' ) );
+			await updateDomainInHosts( oldDomain, domain, site.port );
+			logger.reportSuccess( __( 'Hosts file updated' ) );
+		}
+
+		if ( httpsChanged && https && site.customDomain ) {
+			logger.reportStart( LoggerAction.GENERATE_CERT, __( 'Generating SSL certificates…' ) );
+			await generateSiteCertificate( site.customDomain );
+			logger.reportSuccess( __( 'SSL certificates generated' ) );
+		}
+
+		logger.reportStart( LoggerAction.START_DAEMON, __( 'Starting process daemon…' ) );
+		await connectToDaemon();
+		logger.reportSuccess( __( 'Process daemon started' ) );
+
+		const wasRunning = await isServerRunning( site.id );
+
+		if ( needsRestart && wasRunning ) {
+			logger.reportStart( LoggerAction.STOP_SITE, __( 'Stopping WordPress server…' ) );
+			await stopWordPressServer( site.id );
+			logger.reportSuccess( __( 'WordPress server stopped' ) );
+		}
+
+		if ( wpChanged ) {
+			logger.reportStart( LoggerAction.SET_WP_VERSION, __( 'Updating WordPress version…' ) );
+			await setWordPressVersion( site, wp );
+			logger.reportSuccess( __( 'WordPress version updated' ) );
+
+			await updateConfig( ( cliConfig ) => {
+				const updatedSite = cliConfig.sites.find( ( s ) => s.id === site.id );
+				if ( updatedSite ) {
+					updatedSite.isWpAutoUpdating = wp === DEFAULT_WORDPRESS_VERSION;
+					site = updatedSite;
+				}
+			} );
+		}
+
+		if ( needsRestart && wasRunning ) {
+			if ( site.customDomain ) {
+				await setupCustomDomain( site, logger, { skipHostsUpdate: true } );
+			}
+
+			logger.reportStart( LoggerAction.START_SITE, __( 'Starting WordPress server…' ) );
+			try {
+				await startWordPressServer( site, logger, 'config' );
+			} catch ( error ) {
+				if ( ! credentialsChanged ) {
+					throw error;
+				}
+				// Every start applies the saved credentials, so keeping ones that
+				// failed to apply would leave the site unable to start.
+				site = await restoreAdminCredentials( site.id, previousCredentials );
+				await stopWordPressServer( site.id );
+				await startWordPressServer( site, logger, 'config' );
+				throw new LoggerError(
+					__( 'Failed to update the admin credentials. The previous credentials were restored.' ),
+					error
+				);
+			}
+			logger.reportSuccess( __( 'WordPress server started' ) );
+		}
+
+		logger.reportSuccess( __( 'Site configuration updated' ) );
+
+		await emitCliEvent( { event: SITE_EVENTS.UPDATED, data: { siteId: site.id } } );
+	} finally {
+		await disconnectFromDaemon();
+	}
+}
+
+async function restoreAdminCredentials(
+	siteId: string,
+	credentials: Pick< ConfigSite, 'adminUsername' | 'adminPassword' | 'adminEmail' >
+): Promise< ConfigSite > {
+	return updateConfig( ( cliConfig ) => {
+		const site = cliConfig.sites.find( ( s ) => s.id === siteId );
+		if ( ! site ) {
+			throw new LoggerError( __( 'The specified directory is not added to Studio.' ) );
+		}
+		Object.assign( site, credentials );
+		return site;
+	} );
+}
+
+export const registerCommand = ( yargs: StudioArgv ) => {
+	return yargs.command( {
+		command: 'set',
+		describe: __( 'Configure site settings' ),
+		builder: ( yargs ) => {
+			return yargs
+				.option( 'name', {
+					type: 'string',
+					description: __( 'Site name' ),
+				} )
+				.option( 'domain', {
+					type: 'string',
+					description: __( 'Custom domain (must end with .local)' ),
+				} )
+				.option( 'https', {
+					type: 'boolean',
+					description: __( 'Enable HTTPS (requires custom domain)' ),
+				} )
+				.option( 'php', {
+					type: 'string',
+					description: __( 'PHP version' ),
+					choices: SupportedPHPVersions,
+				} )
+				.option( 'wp', {
+					type: 'string',
+					description: getWpVersionOptionDescription(),
+					coerce: coerceWpVersionOption,
+				} )
+				.option( 'file-access', {
+					type: 'string',
+					description: __( 'Which files PHP can access: the site directory only, or all files' ),
+					choices: [ SITE_FILE_ACCESS_SITE_DIRECTORY, SITE_FILE_ACCESS_ALL_FILES ],
+				} )
+				.option( 'xdebug', {
+					type: 'boolean',
+					description: __( 'Enable Xdebug' ),
+				} )
+				.option( 'php-workers', {
+					type: 'number',
+					description: sprintf(
+						/* translators: %d: default number of PHP workers */
+						__(
+							'Number of PHP workers, which caps how many requests the site serves at once (default %d)'
+						),
+						DEFAULT_SITE_PHP_WORKERS
+					),
+				} )
+				.option( 'admin-username', {
+					type: 'string',
+					description: __( 'Admin username' ),
+				} )
+				.option( 'admin-password', {
+					type: 'string',
+					description: __( 'Admin password' ),
+				} )
+				.option( 'admin-email', {
+					type: 'string',
+					description: __( 'Admin email' ),
+				} )
+				.option( 'debug-log', {
+					type: 'boolean',
+					description: __( 'Enable WP_DEBUG_LOG' ),
+				} )
+				.option( 'debug-display', {
+					type: 'boolean',
+					description: __( 'Enable WP_DEBUG_DISPLAY' ),
+				} )
+				.option( 'script-debug', {
+					type: 'boolean',
+					description: __( 'Enable SCRIPT_DEBUG' ),
+				} )
+				.option( 'environment-type', {
+					type: 'string',
+					description: __( 'Set WP_ENVIRONMENT_TYPE' ),
+					choices: WP_ENVIRONMENT_TYPES,
+				} );
+		},
+		handler: async ( argv ) => {
+			try {
+				await runCommand( argv.path, {
+					name: argv.name,
+					domain: argv.domain,
+					https: argv.https,
+					php: argv.php,
+					wp: argv.wp,
+					fileAccess: siteFileAccessSchema.optional().parse( argv.fileAccess ),
+					xdebug: argv.xdebug,
+					phpWorkers: argv.phpWorkers,
+					adminUsername: argv.adminUsername,
+					adminPassword: argv.adminPassword,
+					adminEmail: argv.adminEmail,
+					debugLog: argv.debugLog,
+					debugDisplay: argv.debugDisplay,
+					scriptDebug: argv.scriptDebug,
+					environmentType: wpEnvironmentTypeSchema.optional().parse( argv.environmentType ),
+				} );
+			} catch ( error ) {
+				if ( error instanceof LoggerError ) {
+					logger.reportError( error );
+				} else {
+					const loggerError = new LoggerError( __( 'Failed to configure site' ), error );
+					logger.reportError( loggerError );
+				}
+				process.exit( 1 );
+			}
+		},
+	} );
+};

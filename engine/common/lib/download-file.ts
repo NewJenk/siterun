@@ -1,0 +1,77 @@
+import fs from 'fs';
+import path from 'path';
+import { Writable } from 'stream';
+import { isErrnoException } from './is-errno-exception.ts';
+
+// How long the server has to start responding. The body itself has no limit, since large
+// files on slow connections take as long as they take.
+const RESPONSE_TIMEOUT_MS = 5_000;
+
+export async function downloadFile(
+	url: string,
+	destinationPath: string,
+	onProgress?: ( downloaded: number, total: number ) => void
+): Promise< void > {
+	try {
+		await fs.promises.mkdir( path.dirname( destinationPath ), { recursive: true } );
+	} catch ( error ) {
+		if ( isErrnoException( error ) && error.code !== 'EEXIST' ) {
+			throw error;
+		}
+	}
+
+	// Node 24's own fetch (undici 7) kills the process with `assert(!this.paused)` when a server
+	// closes the connection while the file is still being written, as wordpress.org does
+	// (nodejs/undici#5360). undici 8 has the fix, and its own Agent keeps the download off Node's
+	// client. Imported here so that only downloads load it.
+	const { Agent, fetch } = await import( 'undici' );
+
+	const controller = new AbortController();
+	const timer = setTimeout(
+		() => controller.abort( new DOMException( 'No response from server', 'TimeoutError' ) ),
+		RESPONSE_TIMEOUT_MS
+	);
+	let response;
+	try {
+		response = await fetch( url, { signal: controller.signal, dispatcher: new Agent() } );
+	} finally {
+		clearTimeout( timer );
+	}
+	if ( ! response.ok ) {
+		throw new Error( `Request failed with status code: ${ response.status }` );
+	}
+	if ( ! response.body ) {
+		throw new Error( 'Download response did not include a readable body.' );
+	}
+
+	if ( ! onProgress ) {
+		await response.body.pipeTo( Writable.toWeb( fs.createWriteStream( destinationPath ) ) );
+		return;
+	}
+
+	const total = Number( response.headers.get( 'content-length' ) ) || 0;
+	let downloaded = 0;
+	const PROGRESS_CHUNK = 512 * 1024; // report every 512 KB
+	let nextReport = PROGRESS_CHUNK;
+
+	const writer = fs.createWriteStream( destinationPath );
+	const reader = response.body.getReader();
+	try {
+		while ( true ) {
+			const { done, value } = await reader.read();
+			if ( done ) break;
+			writer.write( value );
+			downloaded += value.byteLength;
+			if ( downloaded >= nextReport ) {
+				onProgress( downloaded, total );
+				nextReport = downloaded + PROGRESS_CHUNK;
+			}
+		}
+	} finally {
+		reader.releaseLock();
+		await new Promise< void >( ( resolve, reject ) => {
+			writer.end( ( err: Error | null | undefined ) => ( err ? reject( err ) : resolve() ) );
+		} );
+	}
+	onProgress( downloaded, total );
+}

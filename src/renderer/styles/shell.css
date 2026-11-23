@@ -1,0 +1,865 @@
+/*
+  The window's stylesheet. Every colour, gap, radius and type size is a
+  design-system token, so the theme reaches the whole app and stylelint can
+  refuse a hand-written value. The tokens' stylesheet is in the same bundle.
+*/
+
+html,
+body,
+#root {
+	height: 100%;
+}
+
+body {
+	margin: 0;
+	background: var(--wpds-color-background-surface-neutral);
+	color: var(--wpds-color-foreground-content-neutral);
+	font-family: var(--wpds-typography-font-family-body);
+	font-size: var(--wpds-typography-font-size-md);
+	font-weight: var(--wpds-typography-font-weight-default);
+	line-height: var(--wpds-typography-line-height-sm);
+}
+
+#root {
+	isolation: isolate;
+}
+
+code,
+pre {
+	font-family: var(--wpds-typography-font-family-mono);
+}
+
+code {
+	font-size: var(--wpds-typography-font-size-sm);
+	overflow-wrap: anywhere;
+}
+
+.app-root {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	background: var(--wpds-color-background-surface-neutral);
+}
+
+/* Sidebar and page. The page scrolls; nothing else in the shell does. */
+.app-shell {
+	display: grid;
+	grid-template-columns: var(--wpds-dimension-surface-width-sm) minmax(0, 1fr);
+	flex: 1;
+	min-height: 0;
+}
+
+.app-shell > * {
+	min-width: 0;
+}
+
+.app-shell,
+.app-main,
+.site-page,
+.site-hero,
+.site-grid,
+.site-card-wide,
+.site-offline,
+.empty-workspace,
+.cli-missing,
+.cli-missing-card {
+	box-sizing: border-box;
+}
+
+/* With no sites there is no list to sit beside, so the welcome takes the
+   whole window rather than the column after an empty one. */
+.app-shell.is-empty {
+	grid-template-columns: minmax(0, 1fr);
+}
+
+.app-main {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	min-height: 0;
+	overflow-y: auto;
+}
+
+.app-banners {
+	display: flex;
+	flex-direction: column;
+	gap: var(--wpds-dimension-gap-sm);
+	padding: var(--wpds-dimension-padding-lg) var(--wpds-dimension-padding-2xl) 0;
+}
+
+.app-loading {
+	display: flex;
+	flex: 1;
+	align-items: center;
+	justify-content: center;
+	gap: var(--wpds-dimension-gap-sm);
+	padding: var(--wpds-dimension-padding-3xl);
+}
+
+/* --- The sites list ---------------------------------------------------- */
+
+.sites-sidebar {
+	display: flex;
+	flex-direction: column;
+	box-sizing: border-box;
+	width: var(--wpds-dimension-surface-width-sm);
+	height: 100%;
+	min-height: 0;
+	border-inline-end: var(--wpds-border-width-xs) solid
+		var(--wpds-color-stroke-surface-neutral-weak);
+}
+
+.sites-sidebar-list {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	min-height: 0;
+	overflow: auto;
+}
+
+.sites-sidebar-list .dataviews-wrapper {
+	--wp-dataviews-color-background: transparent;
+	height: 100%;
+	min-height: 0;
+	background: transparent;
+}
+
+.sites-sidebar-footer {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--wpds-dimension-gap-sm);
+	padding: var(--wpds-dimension-padding-sm) var(--wpds-dimension-padding-md);
+	border-block-start: var(--wpds-border-width-xs) solid
+		var(--wpds-color-stroke-surface-neutral-weak);
+}
+
+.sites-sidebar-wordmark {
+	font-size: var(--wpds-typography-font-size-sm);
+}
+
+.sites-sidebar-version {
+	color: var(--wpds-color-foreground-content-neutral-weak);
+}
+
+.site-row-name {
+	display: flex;
+	align-items: center;
+	gap: var(--wpds-dimension-gap-sm);
+	min-width: 0;
+}
+
+.site-row-title {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.site-row-meta {
+	display: block;
+	overflow: hidden;
+	color: var(--wpds-color-foreground-content-neutral-weak);
+	font-size: var(--wpds-typography-font-size-sm);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.site-dot {
+	flex: none;
+	width: var(--wpds-dimension-size-4xs);
+	height: var(--wpds-dimension-size-4xs);
+	border-radius: 50%;
+	background: var(--wpds-color-foreground-content-neutral-weak);
+}
+
+.site-dot.is-running {
+	background: var(--wpds-color-foreground-content-success);
+}
+
+.site-dot.is-busy {
+	background: var(--wpds-color-foreground-content-warning);
+}
+
+.site-status {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--wpds-dimension-gap-xs);
+	color: var(--wpds-color-foreground-content-neutral-weak);
+	font-size: var(--wpds-typography-font-size-sm);
+}
+
+/* --- The open site ----------------------------------------------------- */
+
+.site-page {
+	container: site-page / inline-size;
+}
+
+.site-hero,
+.site-grid,
+.site-card-wide,
+.site-offline {
+	width: 100%;
+	max-width: var(--wpds-dimension-surface-width-2xl);
+	margin-inline: auto;
+}
+
+.site-hero {
+	display: flex;
+	align-items: flex-end;
+	justify-content: space-between;
+	flex-wrap: wrap;
+	gap: var(--wpds-dimension-gap-lg);
+	margin-block: var(--wpds-dimension-padding-lg);
+	padding: var(--wpds-dimension-padding-xl);
+	border: var(--wpds-border-width-xs) solid var(--wpds-color-stroke-surface-neutral-weak);
+	border-radius: var(--wpds-border-radius-lg);
+	background: var(--wpds-color-background-surface-neutral-weak);
+}
+
+.site-hero-main {
+	display: flex;
+	flex-direction: column;
+	gap: var(--wpds-dimension-gap-xs);
+	min-width: 0;
+}
+
+.site-url {
+	overflow-wrap: anywhere;
+}
+
+.eyebrow {
+	color: var(--wpds-color-foreground-content-neutral-weak);
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+}
+
+.muted {
+	color: var(--wpds-color-foreground-content-neutral-weak);
+}
+
+.progress-line {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--wpds-dimension-gap-sm);
+	vertical-align: middle;
+}
+
+.site-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+	align-items: stretch;
+	gap: var(--wpds-dimension-gap-lg);
+	margin-block-end: var(--wpds-dimension-gap-lg);
+}
+
+.site-card {
+	height: 100%;
+}
+
+.site-card-wide {
+	margin-block-end: var(--wpds-dimension-gap-lg);
+}
+
+.detail-list {
+	display: flex;
+	flex-direction: column;
+	gap: var(--wpds-dimension-gap-md);
+}
+
+.detail-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: var(--wpds-dimension-gap-lg);
+}
+
+.detail-row {
+	display: flex;
+	flex-direction: column;
+	gap: var(--wpds-dimension-gap-xs);
+	min-width: 0;
+}
+
+.detail-label {
+	color: var(--wpds-color-foreground-content-neutral-weak);
+}
+
+.detail-value {
+	overflow-wrap: anywhere;
+}
+
+.detail-inline {
+	display: flex;
+	align-items: center;
+	gap: var(--wpds-dimension-gap-xs);
+	min-width: 0;
+}
+
+.detail-password {
+	font-family: var(--wpds-typography-font-family-mono);
+}
+
+.site-path {
+	margin-block-end: var(--wpds-dimension-padding-md);
+	overflow-wrap: anywhere;
+	font-family: var(--wpds-typography-font-family-mono);
+	font-size: var(--wpds-typography-font-size-sm);
+}
+
+.site-offline {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: var(--wpds-dimension-gap-sm);
+	padding: var(--wpds-dimension-padding-2xl);
+	border: var(--wpds-border-width-xs) dashed var(--wpds-color-stroke-surface-neutral);
+	border-radius: var(--wpds-border-radius-lg);
+	text-align: center;
+}
+
+/* --- Dialogs and forms ------------------------------------------------- */
+
+.form-section {
+	display: flex;
+	flex-direction: column;
+	gap: var(--wpds-dimension-gap-md);
+}
+
+.form-section + .form-section {
+	padding-block-start: var(--wpds-dimension-padding-lg);
+	border-block-start: var(--wpds-border-width-xs) solid
+		var(--wpds-color-stroke-surface-neutral-weak);
+}
+
+.form-half {
+	flex: 1 1 220px;
+	min-width: 0;
+}
+
+.advanced-trigger {
+	align-self: flex-start;
+}
+
+.wp-cli-output {
+	min-height: calc(var(--wpds-dimension-size-lg) * 3);
+	max-height: calc(var(--wpds-dimension-size-lg) * 10);
+	margin: 0;
+	padding: var(--wpds-dimension-padding-md);
+	overflow: auto;
+	border-radius: var(--wpds-border-radius-md);
+	background: var(--wpds-color-background-surface-neutral-weak);
+	font-family: var(--wpds-typography-font-family-mono);
+	font-size: var(--wpds-typography-font-size-sm);
+	white-space: pre-wrap;
+}
+
+/* --- The database ------------------------------------------------------ */
+
+.database-dialog {
+	display: flex;
+	flex-direction: column;
+	width: min( 1120px, 94vw );
+	max-width: none;
+	height: min( 780px, 90vh );
+	max-height: none;
+}
+
+.database-content {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	min-height: 0;
+	padding: 0;
+}
+
+.db-tabs {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	min-height: 0;
+	padding: var( --wpds-dimension-padding-md ) var( --wpds-dimension-padding-lg );
+}
+
+.db-panel {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	min-height: 0;
+	padding-block-start: var( --wpds-dimension-padding-sm );
+}
+
+.db-panel[hidden] {
+	display: none;
+}
+
+.db-browser {
+	display: grid;
+	flex: 1;
+	grid-template-columns: var( --wpds-dimension-surface-width-xs ) minmax( 0, 1fr );
+	grid-template-rows: minmax( 0, 1fr ) auto;
+	min-height: 0;
+	border: var( --wpds-border-width-xs ) solid var( --wpds-color-stroke-surface-neutral-weak );
+	border-radius: var( --wpds-border-radius-lg );
+	overflow: hidden;
+}
+
+.db-tables {
+	display: flex;
+	flex-direction: column;
+	grid-row: 1 / -1;
+	min-height: 0;
+	border-inline-end: var( --wpds-border-width-xs ) solid
+		var( --wpds-color-stroke-surface-neutral-weak );
+	background: var( --wpds-color-background-surface-neutral-weak );
+}
+
+.db-tables-head {
+	padding: var( --wpds-dimension-padding-sm ) var( --wpds-dimension-padding-sm ) 0;
+}
+
+.db-tables-title {
+	font-weight: var( --wpds-typography-font-weight-emphasis );
+}
+
+.db-table-filter {
+	padding: var( --wpds-dimension-padding-sm );
+}
+
+.db-table-list {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	gap: var( --wpds-dimension-gap-xs );
+	min-height: 0;
+	padding: var( --wpds-dimension-padding-xs );
+	overflow: auto;
+}
+
+.db-table-item {
+	justify-content: flex-start;
+	width: 100%;
+	min-width: 0;
+	text-align: start;
+}
+
+.db-table-item .db-table-count {
+	margin-inline-start: auto;
+	color: var(--wpds-color-foreground-content-neutral-weak);
+	font-size: var(--wpds-typography-font-size-xs);
+	font-variant-numeric: tabular-nums;
+}
+
+.db-table-item[aria-pressed='true'] .db-table-count {
+	color: inherit;
+}
+
+.db-table-name {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.db-table-count {
+	margin-inline-start: auto;
+	color: var( --wpds-color-foreground-content-neutral-weak );
+	font-size: var( --wpds-typography-font-size-xs );
+	font-variant-numeric: tabular-nums;
+}
+
+.db-data {
+	display: flex;
+	flex-direction: column;
+	grid-column: 2;
+	grid-row: 1;
+	min-width: 0;
+	min-height: 0;
+}
+
+.db-data-head {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	flex-wrap: wrap;
+	gap: var( --wpds-dimension-gap-md );
+	padding: var( --wpds-dimension-padding-md );
+	border-block-end: var( --wpds-border-width-xs ) solid
+		var( --wpds-color-stroke-surface-neutral-weak );
+}
+
+.db-data-head > div:first-child {
+	display: flex;
+	flex-direction: column;
+	gap: var( --wpds-dimension-gap-xs );
+	min-width: 0;
+}
+
+.db-table-scroll {
+	flex: 1;
+	min-height: 0;
+	overflow: auto;
+}
+
+.db-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: var( --wpds-typography-font-size-sm );
+}
+
+.db-table th {
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	padding: var( --wpds-dimension-padding-xs ) var( --wpds-dimension-padding-sm );
+	border-block-end: var( --wpds-border-width-xs ) solid
+		var( --wpds-color-stroke-surface-neutral );
+	background: var( --wpds-color-background-surface-neutral-strong );
+	font-weight: var( --wpds-typography-font-weight-emphasis );
+	text-align: start;
+	white-space: nowrap;
+}
+
+.db-table td {
+	max-width: var( --wpds-dimension-surface-width-xs );
+	padding: var( --wpds-dimension-padding-xs ) var( --wpds-dimension-padding-sm );
+	overflow: hidden;
+	border-block-end: var( --wpds-border-width-xs ) solid
+		var( --wpds-color-stroke-surface-neutral-weak );
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.db-table tbody tr:hover td {
+	background: var( --wpds-color-background-surface-neutral-weak );
+}
+
+.db-table td[data-selected] {
+	background: var( --wpds-color-background-interactive-brand-weak );
+}
+
+.db-row-number {
+	width: 1%;
+	color: var( --wpds-color-foreground-content-neutral-weak );
+	font-variant-numeric: tabular-nums;
+	text-align: end;
+}
+
+.db-sort {
+	display: inline-flex;
+	align-items: center;
+	justify-content: flex-start;
+	gap: var( --wpds-dimension-gap-xs );
+	color: inherit;
+}
+
+.db-column-type {
+	display: block;
+	color: var( --wpds-color-foreground-content-neutral-weak );
+	font-size: var( --wpds-typography-font-size-xs );
+	font-weight: var( --wpds-typography-font-weight-default );
+}
+
+.db-null {
+	color: var( --wpds-color-foreground-content-neutral-weak );
+	font-style: italic;
+}
+
+.db-pager {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var( --wpds-dimension-gap-sm );
+	padding: var( --wpds-dimension-padding-xs ) var( --wpds-dimension-padding-md );
+	border-block-start: var( --wpds-border-width-xs ) solid
+		var( --wpds-color-stroke-surface-neutral-weak );
+}
+
+.db-cell-detail {
+	grid-column: 2;
+	grid-row: 2;
+	max-height: 200px;
+	padding: var( --wpds-dimension-padding-sm ) var( --wpds-dimension-padding-md );
+	overflow: auto;
+	border-block-start: var( --wpds-border-width-xs ) solid
+		var( --wpds-color-stroke-surface-neutral );
+	background: var( --wpds-color-background-surface-neutral-weak );
+}
+
+.db-cell-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var( --wpds-dimension-gap-sm );
+}
+
+.db-cell-value {
+	max-height: 100px;
+	margin: var( --wpds-dimension-padding-xs ) 0 0;
+	padding: var( --wpds-dimension-padding-sm );
+	overflow: auto;
+	border-radius: var( --wpds-border-radius-sm );
+	background: var( --wpds-color-background-surface-neutral-strong );
+	font-family: var( --wpds-typography-font-family-mono );
+	font-size: var( --wpds-typography-font-size-sm );
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.db-loading {
+	display: flex;
+	flex: 1;
+	align-items: center;
+	justify-content: center;
+	gap: var( --wpds-dimension-gap-sm );
+	padding: var( --wpds-dimension-padding-2xl );
+	color: var( --wpds-color-foreground-content-neutral-weak );
+}
+
+.db-sql {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	gap: var( --wpds-dimension-gap-md );
+	min-height: 0;
+	padding: var( --wpds-dimension-padding-xs );
+	overflow: auto;
+}
+
+.db-sql-head {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: var( --wpds-dimension-gap-md );
+}
+
+.db-sql textarea {
+	min-height: 140px;
+	font-family: var( --wpds-typography-font-family-mono );
+	font-size: var( --wpds-typography-font-size-sm );
+	line-height: var( --wpds-typography-line-height-md );
+}
+
+.db-query-result {
+	display: flex;
+	flex-direction: column;
+	gap: var( --wpds-dimension-gap-xs );
+}
+
+.db-result-scroll {
+	max-height: 280px;
+	overflow: auto;
+	border: var( --wpds-border-width-xs ) solid var( --wpds-color-stroke-surface-neutral-weak );
+	border-radius: var( --wpds-border-radius-md );
+}
+
+.db-statement {
+	max-height: 180px;
+	margin: 0;
+	padding: var( --wpds-dimension-padding-sm );
+	overflow: auto;
+	border-radius: var( --wpds-border-radius-md );
+	background: var( --wpds-color-background-surface-neutral-weak );
+	font-family: var( --wpds-typography-font-family-mono );
+	font-size: var( --wpds-typography-font-size-sm );
+	white-space: pre-wrap;
+}
+
+.db-footer {
+	width: 100%;
+}
+
+/* --- The empty window -------------------------------------------------- */
+
+.empty-workspace {
+	box-sizing: border-box;
+	align-self: center;
+	width: 100%;
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	align-items: center;
+	justify-content: flex-start;
+	max-width: var(--wpds-dimension-surface-width-2xl);
+	margin-inline: auto;
+	padding: var(--wpds-dimension-padding-3xl);
+	text-align: center;
+}
+
+.empty-content {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: var(--wpds-dimension-gap-lg);
+	width: 100%;
+	margin-block: auto;
+}
+
+.siterun-wordmark {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.45em;
+	color: var(--wpds-color-foreground-content-neutral);
+	font-family: var(--wpds-typography-font-family-body);
+	font-size: var(--wpds-typography-font-size-md);
+	font-weight: 700;
+	letter-spacing: -0.055em;
+	line-height: 1;
+	white-space: nowrap;
+	font-synthesis: none;
+}
+
+.siterun-mark {
+	color: var(--wpds-color-foreground-interactive-brand);
+	font-family: var(--wpds-typography-font-family-mono);
+	font-weight: 700;
+	letter-spacing: -0.08em;
+	line-height: 1;
+}
+
+.siterun-wordmark-mark {
+	flex: none;
+	font-size: 1.05em;
+}
+
+.sites-sidebar-mark {
+	font-size: var(--wpds-typography-font-size-lg);
+}
+
+.loading-wordmark {
+	font-size: var(--wpds-typography-font-size-xl);
+}
+
+.cli-missing-wordmark {
+	align-self: center;
+	font-size: var(--wpds-typography-font-size-xl);
+}
+
+.siterun-wordmark-text {
+	display: inline-block;
+}
+
+.siterun-wordmark-run {
+	font-style: italic;
+}
+
+.empty-wordmark {
+	font-size: calc(var(--wpds-typography-font-size-2xl) * 1.25);
+}
+
+.about-wordmark {
+	font-size: var(--wpds-typography-font-size-xl);
+}
+
+.empty-credit {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.5em;
+	padding-block-start: var(--wpds-dimension-padding-xl);
+	color: var(--wpds-color-foreground-content-neutral-weak);
+	font-size: var(--wpds-typography-font-size-sm);
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+}
+
+.empty-credit-wordmark {
+	display: block;
+	width: 8.5em;
+	height: auto;
+	color: var(--wpds-color-foreground-interactive-brand);
+}
+
+.empty-title {
+	margin: 0;
+}
+
+.empty-lede {
+	max-width: var(--wpds-dimension-surface-width-md);
+	color: var(--wpds-color-foreground-content-neutral-weak);
+}
+
+.empty-features {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+	gap: var(--wpds-dimension-gap-lg);
+	width: 100%;
+	margin-block-start: var(--wpds-dimension-padding-lg);
+}
+
+.empty-feature {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: var(--wpds-dimension-gap-sm);
+	padding: var(--wpds-dimension-padding-lg);
+	border: var(--wpds-border-width-xs) solid var(--wpds-color-stroke-surface-neutral-weak);
+	border-radius: var(--wpds-border-radius-lg);
+	background: var(--wpds-color-background-surface-neutral-weak);
+}
+
+.empty-footnote {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--wpds-dimension-gap-xs);
+	color: var(--wpds-color-foreground-content-neutral-weak);
+}
+
+/* --- The missing engine ------------------------------------------------ */
+
+.cli-missing {
+	display: grid;
+	flex: 1;
+	place-items: center;
+	padding: var(--wpds-dimension-padding-3xl);
+}
+
+.cli-missing-card {
+	max-width: var(--wpds-dimension-surface-width-2xl);
+	width: 100%;
+}
+
+.cli-missing-command {
+	margin: 0;
+	padding: var(--wpds-dimension-padding-md);
+	overflow: auto;
+	border-radius: var(--wpds-border-radius-md);
+	background: var(--wpds-color-background-surface-neutral-weak);
+	white-space: pre-wrap;
+}
+
+.cli-missing-path {
+	display: block;
+	color: var(--wpds-color-foreground-content-neutral-weak);
+}
+
+/* --- Confirmations ----------------------------------------------------- */
+
+.toast-stack {
+	position: fixed;
+	inset-block-end: var(--wpds-dimension-padding-2xl);
+	inset-inline-end: var(--wpds-dimension-padding-2xl);
+	z-index: 100;
+	display: flex;
+	flex-direction: column;
+	gap: var(--wpds-dimension-gap-sm);
+	width: var(--wpds-dimension-surface-width-sm);
+	max-width: calc(100vw - (var(--wpds-dimension-padding-2xl) * 2));
+}
+
+.toast-stack:empty {
+	display: none;
+}
+
+.db-example {
+	padding: var( --wpds-dimension-padding-xs ) var( --wpds-dimension-padding-sm );
+	border: var( --wpds-border-width-xs ) solid var( --wpds-color-stroke-surface-neutral-weak );
+	border-radius: var( --wpds-border-radius-sm );
+	background: var( --wpds-color-background-surface-neutral-strong );
+	font-family: var( --wpds-typography-font-family-mono );
+	font-size: var( --wpds-typography-font-size-xs );
+	font-weight: var( --wpds-typography-font-weight-default );
+}
+
+.db-example:hover {
+	border-color: var( --wpds-color-stroke-interactive-neutral );
+	background: var( --wpds-color-background-interactive-neutral-weak );
+}

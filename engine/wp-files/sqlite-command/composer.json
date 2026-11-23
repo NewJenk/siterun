@@ -1,0 +1,63 @@
+{
+  "name": "automattic/wp-cli-sqlite-command",
+  "description": "A command for importing and exporting from an SQLite database",
+  "homepage": "https://github.com/Automattic/wp-cli-sqlite-command",
+  "type": "wp-cli-package",
+  "license": "GPL-2.0-or-later",
+  "autoload": {
+    "files": [
+      "command.php"
+    ],
+    "classmap": [
+      "src/"
+    ]
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Automattic\\WP_CLI\\SQLite\\": "features/bootstrap/"
+    }
+  },
+  "authors": [
+    {
+      "name": "Jeroen Pfeil",
+      "email": "jeroen.pfeil@automattic.com"
+    }
+  ],
+  "require": {
+    "php": ">=7.4",
+    "wp-cli/wp-cli": "^2.12 || ^3.0@dev"
+  },
+  "require-dev": {
+    "wp-cli/wp-cli-tests": "^5.3.4",
+    "phpcompatibility/php-compatibility": "^10.0@alpha",
+    "wp-coding-standards/wpcs": "@dev"
+  },
+  "scripts": {
+    "behat": "run-behat-tests",
+    "behat-rerun": "rerun-behat-tests",
+    "lint": "run-linter-tests",
+    "lint-gherkin": "run-gherkin-lint-tests",
+    "phpcs": "run-phpcs-tests",
+    "phpcbf": "run-phpcbf-cleanup",
+    "phpstan": "run-phpstan-tests",
+    "phpunit": "run-php-unit-tests",
+    "prepare-tests": "install-package-tests",
+    "test": [
+      "@lint",
+      "@lint-gherkin",
+      "@phpcs",
+      "@phpunit",
+      "@behat"
+    ]
+  },
+  "prefer-stable": true,
+  "config": {
+    "allow-plugins": {
+      "dealerdirect/phpcodesniffer-composer-installer": true,
+      "phpstan/extension-installer": true
+    },
+    "platform": {
+      "php": "7.4"
+    }
+  }
+}

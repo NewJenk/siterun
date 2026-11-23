@@ -1,0 +1,349 @@
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import { rootCertificates } from 'node:tls';
+import os from 'os';
+import path from 'path';
+import { writeFile } from 'atomically';
+import semver from 'semver';
+import { getBundledSendmailScriptPath, getPhpBinaryPath } from '../dependency-management/paths';
+import type { SupportedPHPVersion } from '@studio/common/types/php-versions';
+
+// Disabled to shrink the attack surface available to PHP code running inside a
+// Studio site. Each entry falls into one of:
+//   - Runtime native-code loading: dl (loads a native extension into the
+//     interpreter — deprecated, unavailable in most SAPIs, never needed by a
+//     real WP workload)
+//   - Forking / replacing the worker process itself: pcntl_exec, pcntl_fork.
+//     These mutate the PHP worker process rather than spawning a child
+//     command; the legitimate "run an external command" use case is served by
+//     the exec/proc_open family, which is intentionally NOT disabled (see
+//     note below).
+//   - Signal & scheduling control (DoS / handler hijack): pcntl_alarm,
+//     pcntl_async_signals, pcntl_sig*, pcntl_*priority, proc_nice, posix_kill
+//   - Privilege change: posix_set*
+//   - Inbound networking (binding listening sockets): socket_accept/bind/
+//     listen/create_listen/create_pair, stream_socket_server
+//   - Filesystem tricks that can escape open_basedir or create odd
+//     primitives: link, symlink, posix_mkfifo
+//   - Source disclosure: show_source
+//
+// NOTE: the external-command-execution functions (exec, passthru, popen,
+// proc_open/close/terminate, shell_exec, system) are deliberately left
+// enabled. Blocking them broke too many plugins and tools that legitimately
+// shell out (image processing, backups, git, etc.), so for the native PHP
+// beta a site may run external commands like a normal local PHP install.
+//
+// WHAT THIS ACTUALLY BUYS US: this list and the open_basedir jail are
+// in-process checks — they only constrain PHP's own C-level calls. Once the
+// exec family is enabled, a child process runs as the OS user with none of
+// these checks, so most entries here have trivial shell equivalents (open_
+// basedir → `cat`/`cp`, symlink → `ln -s`, posix_kill → `kill`, socket_bind →
+// `nc -l`, show_source → `cat`). The only entries a child process cannot
+// replicate are the interpreter-level ones (dl, pcntl_fork, pcntl_exec,
+// pcntl_signal*). So treat all of this as a guardrail that limits the blast
+// radius of buggy or limited-primitive code — the common WP case (LFI, path
+// traversal, arbitrary file read/delete that abuses a PHP file function and
+// never shells out) is still genuinely contained by open_basedir — NOT as a
+// sandbox against deliberately malicious plugins. Real confinement of the
+// worker process tree (which survives exec) requires an OS-level sandbox.
+const PHP_DEFAULT_DISABLED_FUNCTIONS = [
+	'dl',
+	'link',
+	'pcntl_alarm',
+	'pcntl_async_signals',
+	'pcntl_exec',
+	'pcntl_fork',
+	'pcntl_getpriority',
+	'pcntl_setpriority',
+	'pcntl_signal',
+	'pcntl_signal_dispatch',
+	'pcntl_signal_get_handler',
+	'pcntl_sigprocmask',
+	'pcntl_sigtimedwait',
+	'pcntl_sigwaitinfo',
+	'posix_kill',
+	'posix_mkfifo',
+	'posix_setegid',
+	'posix_seteuid',
+	'posix_setgid',
+	'posix_setpgid',
+	'posix_setsid',
+	'posix_setuid',
+	'proc_nice',
+	'show_source',
+	'socket_accept',
+	'socket_bind',
+	'socket_create_listen',
+	'socket_create_pair',
+	'socket_listen',
+	'stream_socket_server',
+	'symlink',
+] as const;
+
+// Extensions to enable on Windows via `extension=<name>` in php.ini. Computed
+// as the intersection of two sets:
+//   1. php_*.dll files that ship as separate DLLs in windows.php.net's
+//      prebuilt zip (plus the PECL DLLs the workflow overlays: apcu, igbinary,
+//      redis, ssh2, yaml). Everything else from the macOS list is baked into
+//      php.exe itself (bcmath, calendar, ctype, dom, filter, iconv, mbregex,
+//      mysqlnd, pdo, phar, session, simplexml, tokenizer, xml*, zlib) and
+//      would emit "Module already loaded" warnings if we tried to enable it
+//      with `extension=`.
+//   2. The curated macOS extension list in .github/workflows/build-php-cli-binaries.yml.
+//      windows.php.net also ships bz2, com_dotnet, enchant, ffi, gmp, ldap,
+//      odbc, pdo_firebird, pdo_odbc, pdo_pgsql, pgsql, snmp, sysvshm, and
+//      tidy, but Studio doesn't ship those on macOS, so we don't enable them
+//      on Windows either to keep behavior symmetric.
+// opcache and xdebug are Zend extensions and loaded separately via
+// `zend_extension=` (the latter only when config.enableXdebug is true). On
+// macOS every extension is baked into the `php` binary by static-php-cli, so
+// this list is irrelevant there.
+const WINDOWS_PHP_EXTENSIONS = [
+	'apcu',
+	'curl',
+	'dba',
+	'exif',
+	'fileinfo',
+	'ftp',
+	'gd',
+	'gettext',
+	'igbinary',
+	'intl',
+	'mbstring',
+	'mysqli',
+	'openssl',
+	'pdo_mysql',
+	'pdo_sqlite',
+	'redis',
+	'shmop',
+	'soap',
+	'sockets',
+	'sodium',
+	'sqlite3',
+	'ssh2',
+	'xsl',
+	'yaml',
+	'zip',
+] as const;
+
+const PHP_INI_FILENAME = 'php.ini';
+const CA_BUNDLE_FILENAME = 'ca-bundle.crt';
+
+// Windows PHP reads its argv and loads extensions with ANSI APIs, which take
+// paths in the system code page instead of UTF-8, so from a profile like
+// `C:\Users\José` it loses php.ini or every extension. The directory's 8.3
+// short name is ASCII.
+function getPhpBinaryDir( phpVersion: SupportedPHPVersion ): string {
+	const binaryDir = resolveSymlinks( path.dirname( getPhpBinaryPath( phpVersion ) ) );
+	if ( process.platform !== 'win32' || isAscii( binaryDir ) ) {
+		return binaryDir;
+	}
+	return getWindowsShortPath( binaryDir );
+}
+
+// php.ini holds absolute paths, so it must name the real directory: a php-bin reached
+// through a link (the CLI e2e harness links the real one into a temporary config
+// directory) would otherwise be left pointing at a path that is later deleted.
+function resolveSymlinks( dir: string ): string {
+	try {
+		return fs.realpathSync( dir );
+	} catch {
+		return dir;
+	}
+}
+
+function getExtensionDir( phpVersion: SupportedPHPVersion ): string {
+	return path.join( getPhpBinaryDir( phpVersion ), 'ext' );
+}
+
+function isAscii( value: string ): boolean {
+	return /^[\x20-\x7e]*$/.test( value );
+}
+
+// Falls back to the long path when the volume doesn't create short names.
+function getWindowsShortPath( longPath: string ): string {
+	const result = spawnSync(
+		'cmd.exe',
+		[ '/d', '/s', '/c', '"for %I in ("%STUDIO_LONG_PATH%") do @echo %~sI"' ],
+		{
+			env: { ...process.env, STUDIO_LONG_PATH: longPath },
+			encoding: 'latin1',
+			timeout: 5_000,
+			windowsHide: true,
+			windowsVerbatimArguments: true,
+		}
+	);
+	const shortPath = result.stdout?.trim();
+	return shortPath && isAscii( shortPath ) ? shortPath : longPath;
+}
+
+// PHP's INI parser on Windows accepts forward slashes inside quoted values
+// and is fussy about backslashes (which also act as escape characters).
+// Handle both characters in a single pass: backslashes become forward slashes,
+// and double-quotes are backslash-escaped. Using one replace() call avoids any
+// ordering ambiguity — there is no intermediate state where a newly introduced
+// backslash could interact with a not-yet-processed double-quote.
+function toPhpIniPath( filePath: string ): string {
+	return filePath.replace( /[\\"]/g, ( char ) => ( char === '\\' ? '/' : '\\"' ) );
+}
+
+function getNativePhpIniPath( phpVersion: SupportedPHPVersion ): string {
+	return path.join( getPhpBinaryDir( phpVersion ), PHP_INI_FILENAME );
+}
+
+// Generates the contents of the php.ini that ships next to the bundled binary.
+// All platforms get memory_limit, an opcache cache_id partitioned per PHP
+// version, and the Mozilla root CA bundle. Windows additionally needs extension_dir +
+// every extension= and zend_extension=opcache. On macOS/Linux, this is not
+// needed, as we link extensions into the PHP binary statically.
+export function getNativePhpIniContents( phpVersion: SupportedPHPVersion ): string {
+	const caBundlePath = toPhpIniPath(
+		path.join( getPhpBinaryDir( phpVersion ), CA_BUNDLE_FILENAME )
+	);
+	const directives: string[] = [
+		'memory_limit=512M',
+		'max_execution_time=0',
+		'post_max_size=2G',
+		'upload_max_filesize=2G',
+		'max_input_vars=10000',
+		'display_errors=1',
+		'display_startup_errors=1',
+		`opcache.cache_id="studio-php${ phpVersion }"`,
+		`openssl.cafile="${ caBundlePath }"`,
+		`curl.cainfo="${ caBundlePath }"`,
+	];
+
+	if ( process.platform === 'win32' ) {
+		directives.push(
+			`extension_dir="${ toPhpIniPath( getExtensionDir( phpVersion ) ) }"`,
+			...WINDOWS_PHP_EXTENSIONS.map( ( extension ) => `extension=${ extension }` )
+		);
+
+		const coercedVersion = semver.coerce( phpVersion );
+		// As of PHP 8.5, the OPcache extension is always bundled with PHP
+		if ( coercedVersion && semver.lt( coercedVersion, '8.5.0' ) ) {
+			directives.push( 'zend_extension=opcache' );
+		}
+	}
+
+	return `${ directives.join( os.EOL ) }${ os.EOL }`;
+}
+
+// Writes php.ini and ca-bundle.crt next to the PHP binary so every invocation
+// of the bundled binary — parent or child — loads the same config. Writes go
+// through `atomically` so concurrent Studio processes (e.g. a CLI invocation
+// while the daemon is already running) can't expose PHP to a half-written
+// config.
+export async function ensureNativePhpIniFiles( phpVersion: SupportedPHPVersion ): Promise< void > {
+	const binDir = getPhpBinaryDir( phpVersion );
+	await writeFile( path.join( binDir, CA_BUNDLE_FILENAME ), rootCertificates.join( os.EOL ), {
+		encoding: 'utf8',
+	} );
+	await writeFile( getNativePhpIniPath( phpVersion ), getNativePhpIniContents( phpVersion ), {
+		encoding: 'utf8',
+	} );
+}
+
+function getXdebugFilename(): string {
+	return process.platform === 'win32' ? 'php_xdebug.dll' : 'xdebug.so';
+}
+
+// On Windows, every PHP process whose opcache.cache_id matches attaches to the same
+// shared memory segment, and attaching fails when the segment can't be mapped at
+// the creator's base address. Giving each server worker its own cache_id means no
+// worker ever attaches to another's segment, so the opcache file cache that used to
+// absorb those failures (#3343) is no longer needed. That cache wrote ~550 files
+// into a fresh temp directory on every site start, and Defender scanned each one.
+// The counter keeps a respawned worker off a segment its predecessor may still hold.
+// One-shot PHP runs with opcache.enable_cli=0, so it needs neither. Other platforms
+// have no shared segment between processes, so they keep the php.ini cache_id.
+let opcacheSegmentCount = 0;
+
+function getOpcacheArgs( workerIndex: number | undefined ): string[] {
+	if ( process.platform !== 'win32' || workerIndex === undefined ) {
+		return [];
+	}
+
+	opcacheSegmentCount += 1;
+	return [ '-d', `opcache.cache_id="studio-${ process.pid }-${ opcacheSegmentCount }"` ];
+}
+
+type DefaultPhpArgsOptions = {
+	openBasedir?: string[];
+	disallowRiskyFunctions?: boolean;
+	enableXdebug?: boolean;
+	autoPrependFile?: string;
+	workerIndex?: number;
+	// Where the email this PHP process sends is saved; see `@studio/common/sites/site-email`.
+	emailDirectory?: string;
+};
+
+export function getDefaultPhpArgs(
+	phpVersion: SupportedPHPVersion,
+	{
+		openBasedir = [],
+		disallowRiskyFunctions = false,
+		enableXdebug = false,
+		autoPrependFile,
+		workerIndex,
+		emailDirectory,
+	}: DefaultPhpArgsOptions = {}
+): string[] {
+	// `-c` points the binary at our php.ini and short-circuits the default
+	// ini search, so host PHP installations (and PHPRC) can't leak in
+	const args: string[] = [
+		'-c',
+		getNativePhpIniPath( phpVersion ),
+		...getOpcacheArgs( workerIndex ),
+	];
+
+	if ( enableXdebug ) {
+		// On macOS the `php` binary has every other extension baked in and ext/
+		// contains only xdebug.so; on Windows extension_dir is already set in
+		// php.ini. Either way the Zend extension path is ext/<filename>.
+		if ( process.platform !== 'win32' ) {
+			args.push( '-d', `extension_dir="${ getExtensionDir( phpVersion ) }"` );
+		}
+		args.push(
+			'-d',
+			`zend_extension="${ path.join( getExtensionDir( phpVersion ), getXdebugFilename() ) }"`,
+			'-d',
+			'xdebug.mode=debug',
+			// Override Xdebug's default `trigger` mode
+			// (https://xdebug.org/docs/all_settings#start_with_request):
+			// enabling Xdebug for a site means every request starts debugging.
+			'-d',
+			'xdebug.start_with_request=yes'
+		);
+	}
+
+	if ( openBasedir.length ) {
+		args.push( '-d', `open_basedir="${ openBasedir.join( path.delimiter ) }"` );
+	}
+
+	if ( disallowRiskyFunctions ) {
+		args.push( '-d', `disable_functions=${ PHP_DEFAULT_DISABLED_FUNCTIONS.join( ',' ) }` );
+	}
+
+	// Run a PHP file before the main script — used to inject reprint's generated
+	// runtime.php (constants, SQLite loader, upload proxy) into imported sites
+	// without modifying their wp-config.php.
+	if ( autoPrependFile ) {
+		args.push( '-d', `auto_prepend_file="${ toPhpIniPath( autoPrependFile ) }"` );
+	}
+
+	if ( emailDirectory ) {
+		// `-n`: the script needs no extensions, so it skips loading php.ini.
+		const sendmailCommand = [
+			getPhpBinaryPath( phpVersion ),
+			'-n',
+			getBundledSendmailScriptPath(),
+			emailDirectory,
+		]
+			.map( ( part ) => `"${ part }"` )
+			.join( ' ' );
+		args.push( '-d', `sendmail_path="${ toPhpIniPath( sendmailCommand ) }"` );
+	}
+
+	return args;
+}

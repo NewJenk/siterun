@@ -1,0 +1,625 @@
+import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import {
+	customizeBlueprint,
+	inspectBlueprint,
+	validateBlueprint,
+	type Blueprint,
+} from '@studio/blueprints';
+import { DEFAULT_WORDPRESS_VERSION } from '@studio/common/constants';
+import { SITE_EVENTS } from '@studio/common/lib/cli-events';
+import { readConfig, updateConfig } from '@studio/common/lib/config/store';
+import { getDomainNameValidationError } from '@studio/common/lib/domains';
+import {
+	arePathsEqual,
+	isEmptyDir,
+	isWordPressDirectory,
+	pathExists,
+	recursiveCopyDirectory,
+} from '@studio/common/lib/fs-utils';
+import { normalizeLandingPage } from '@studio/common/lib/landing-page';
+import { DEFAULT_LOCALE } from '@studio/common/lib/locale';
+import { isNetworkError } from '@studio/common/lib/network-utils';
+import {
+	createPassword,
+	encodePassword,
+	validateAdminEmail,
+	validateAdminUsername,
+} from '@studio/common/lib/passwords';
+import { portFinder } from '@studio/common/lib/port-finder';
+import {
+	hasDefaultDbBlock,
+	removeDbConstants,
+} from '@studio/common/lib/remove-default-db-constants';
+import { type SiteFileAccess } from '@studio/common/lib/site-file-access';
+import { sortSites } from '@studio/common/lib/sort-sites';
+import { getServerFilesPath } from '@studio/common/lib/well-known-paths';
+import { fetchWordPressVersions } from '@studio/common/lib/wordpress-versions';
+import { SiteCommandLoggerAction as LoggerAction } from '@studio/common/logger-actions';
+import {
+	RecommendedPHPVersion,
+	SupportedPHPVersions,
+	type SupportedPHPVersion,
+} from '@studio/common/types/php-versions';
+import { __, sprintf } from '@wordpress/i18n';
+import { openBlueprintSource } from 'cli/lib/blueprint-source';
+import { getSiteUrl, removeSiteFromConfig } from 'cli/lib/cli-config/sites';
+import { getWordPressVersionPath } from 'cli/lib/dependency-management/paths';
+import {
+	connectToDaemon,
+	disconnectFromDaemon,
+	emitCliEvent,
+} from 'cli/lib/daemon-client';
+import { updateServerFiles } from 'cli/lib/dependency-management/setup';
+import { downloadWordPress } from 'cli/lib/dependency-management/wordpress';
+import { copyLanguagePackToSite } from 'cli/lib/language-packs';
+import { validateSupportedPhpVersion } from 'cli/lib/php-versions';
+import { confirm, input, password, select } from 'cli/lib/prompts';
+import { assertSiteCountLimit } from 'cli/lib/site-capacity';
+import { getPreferredSiteLanguage } from 'cli/lib/site-language';
+import { generateSiteName } from 'cli/lib/site-name';
+import { getDefaultSitePath } from 'cli/lib/site-paths';
+import { logSiteDetails, openSiteInBrowser, setupCustomDomain } from 'cli/lib/site-utils';
+import { keepSqliteIntegrationUpdated } from 'cli/lib/sqlite-integration';
+import { untildify } from 'cli/lib/utils';
+import { setUpSite, startWordPressServer } from 'cli/lib/wordpress-server-manager';
+import {} from 'cli/lib/wp-version-option';
+import { Logger, LoggerError } from 'cli/logger';
+import type { ConfigSite } from '@studio/common/lib/config/schema';
+import type { builder } from 'cli/commands/site/create.command';
+import type { CommandArgs } from 'cli/types';
+
+const defaultLogger = new Logger< LoggerAction >();
+export type CreateCommandOptions = {
+	name?: string;
+	siteId?: string;
+	wpVersion: string;
+	phpVersion: SupportedPHPVersion;
+	fileAccess: SiteFileAccess;
+	customDomain?: string;
+	enableHttps: boolean;
+	blueprint?: {
+		contents: unknown;
+		uri: string;
+		};
+	adminUsername?: string;
+	adminPassword?: string;
+	adminEmail?: string;
+	noStart: boolean;
+	skipBrowser: boolean;
+	skipLogDetails: boolean;
+};
+
+async function validateSitePath( sitePath: string ) {
+	const exists = await pathExists( sitePath );
+	const isEmpty = exists && ( await isEmptyDir( sitePath ) );
+	const isWordPressDir = exists && isWordPressDirectory( sitePath );
+
+	if ( exists && ! isEmpty && ! isWordPressDir ) {
+		throw new LoggerError(
+			__( 'The selected directory is not empty nor an existing WordPress site.' )
+		);
+	}
+
+	return { exists, isWordPressDir };
+}
+
+function validateCustomDomain( customDomain: string | undefined, sites: ConfigSite[] ) {
+	if ( ! customDomain ) {
+		return;
+	}
+	const existingDomains = sites
+		.map( ( site ) => site.customDomain )
+		.filter( ( domain ): domain is string => Boolean( domain ) );
+	const domainError = getDomainNameValidationError( true, customDomain, existingDomains );
+	if ( domainError ) {
+		throw new LoggerError( domainError );
+	}
+}
+
+export async function runCommand(
+	sitePath: string,
+	options: CreateCommandOptions,
+	logger: Logger< LoggerAction > = defaultLogger
+): Promise< void > {
+	const phpVersion = validateSupportedPhpVersion( options.phpVersion );
+
+	try {
+		const updated = await updateServerFiles();
+		if ( updated ) {
+			logger.reportSuccess( __( 'Dependencies updated' ) );
+		}
+	} catch ( error ) {
+		// Errors here aren't critical and likely relate to things outside the user's control,
+		// like network issues or bad API responses. Report them only in development.
+		if ( process.env.NODE_ENV !== 'production' ) {
+			const loggerError = new LoggerError( 'Failed to update dependencies', error );
+			logger.reportError( loggerError, false );
+		}
+	}
+
+	try {
+		logger.reportStart( LoggerAction.VALIDATE, __( 'Validating site configuration…' ) );
+
+		const { exists: pathExistsResult, isWordPressDir: isWordPressDirResult } =
+			await validateSitePath( sitePath );
+
+		let blueprintUri: string | undefined;
+		let blueprint: Blueprint | undefined;
+		let blueprintCredentials: { adminUsername?: string; adminPassword?: string } | null = null;
+
+		if ( options.blueprint ) {
+			try {
+				blueprint = validateBlueprint( options.blueprint.contents );
+			} catch ( error ) {
+				throw new LoggerError( ( error as Error ).message );
+			}
+			const details = inspectBlueprint( blueprint );
+			if ( details.login?.username || details.login?.password ) {
+				blueprintCredentials = {
+					adminUsername: details.login.username,
+					adminPassword: details.login.password,
+				};
+			}
+
+			// The site's own name and domain win over what the Blueprint sets.
+			const scheme = options.enableHttps ? 'https' : 'http';
+			blueprint = customizeBlueprint( blueprint, {
+				siteTitle: options.name,
+				siteUrl: options.customDomain ? `${ scheme }://${ options.customDomain }` : undefined,
+			} );
+			blueprintUri = options.blueprint.uri;
+
+			if ( details.multisite && ! options.customDomain ) {
+				throw new LoggerError(
+					__(
+						'The enableMultisite Blueprint step requires a custom domain. WordPress multisite does not support custom ports. Use --domain <name>.local to set a custom domain.'
+					)
+				);
+			}
+		}
+
+		const cliConfig = await readConfig();
+		const existingSite = cliConfig.sites.find( ( site ) => arePathsEqual( site.path, sitePath ) );
+		if ( existingSite ) {
+			throw new LoggerError( __( 'The selected directory is already in use.' ) );
+		}
+
+		assertSiteCountLimit( cliConfig.sites );
+		validateCustomDomain( options.customDomain, cliConfig.sites );
+
+		logger.reportSuccess( __( 'Site configuration validated' ) );
+
+		if ( ! pathExistsResult ) {
+			logger.reportStart( LoggerAction.CREATE_DIRECTORY, __( 'Creating site directory…' ) );
+			fs.mkdirSync( sitePath, { recursive: true } );
+			logger.reportSuccess( __( 'Site directory created' ) );
+		}
+
+		if ( options.wpVersion === 'latest' ) {
+			const bundledWPPath = path.join( getServerFilesPath(), 'wordpress-versions', 'latest' );
+
+			if ( ! ( await pathExists( bundledWPPath ) ) ) {
+				throw new LoggerError(
+					__(
+						'Cannot set up WordPress. Bundled WordPress files not found. Please connect to the internet or reinstall Studio.'
+					)
+				);
+			}
+
+			logger.reportStart( LoggerAction.SETUP_WORDPRESS, __( 'Copying bundled WordPress…' ) );
+			await recursiveCopyDirectory( bundledWPPath, sitePath );
+			logger.reportSuccess( __( 'WordPress files copied' ) );
+		} else if ( ! isWordPressDirResult ) {
+			logger.reportStart(
+				LoggerAction.SETUP_WORDPRESS,
+				sprintf( __( 'Downloading WordPress %s…' ), options.wpVersion )
+			);
+			await downloadWordPress( options.wpVersion ).catch( ( error: unknown ) => {
+				if ( isNetworkError( error ) ) {
+					throw new LoggerError(
+						__(
+							'Cannot set up WordPress while offline. Specific WordPress versions require an internet connection. Try using "latest" version or ensure internet connectivity.'
+						),
+						error
+					);
+				}
+				throw error;
+			} );
+			logger.reportSuccess( __( 'WordPress files downloaded' ) );
+
+			logger.reportStart(
+				LoggerAction.SETUP_WORDPRESS,
+				sprintf( __( 'Copying WordPress %s…' ), options.wpVersion )
+			);
+			await recursiveCopyDirectory( getWordPressVersionPath( options.wpVersion ), sitePath );
+			logger.reportSuccess( __( 'WordPress files copied' ) );
+		}
+
+		logger.reportStart( LoggerAction.INSTALL_SQLITE, __( 'Setting up SQLite integration…' ) );
+		await keepSqliteIntegrationUpdated( sitePath );
+		logger.reportSuccess( __( 'SQLite integration configured' ) );
+
+		const siteName = options.name || path.basename( sitePath );
+		const siteId = options.siteId || crypto.randomUUID();
+
+		// Determine admin credentials: CLI args > Blueprint > defaults
+		// External passwords need to be encoded; createPassword() already returns encoded
+		const adminUsername = options.adminUsername || blueprintCredentials?.adminUsername || undefined;
+		if ( adminUsername ) {
+			const usernameError = validateAdminUsername( adminUsername );
+			if ( usernameError ) {
+				throw new LoggerError( usernameError );
+			}
+		}
+		const adminEmail = options.adminEmail?.trim() || undefined;
+		if ( adminEmail ) {
+			const emailError = validateAdminEmail( adminEmail );
+			if ( emailError ) {
+				throw new LoggerError( emailError );
+			}
+		}
+
+		const externalPassword = options.adminPassword || blueprintCredentials?.adminPassword;
+		const adminPassword = externalPassword ? encodePassword( externalPassword ) : createPassword();
+
+		const siteLanguage = await getPreferredSiteLanguage( options.wpVersion );
+
+		if (
+			siteLanguage &&
+			siteLanguage !== DEFAULT_LOCALE &&
+			options.wpVersion === DEFAULT_WORDPRESS_VERSION
+		) {
+			await copyLanguagePackToSite( sitePath, siteLanguage );
+		}
+
+		const siteDetails = await updateConfig( async ( userData ) => {
+			// Claim the port in the config file before another create can select it, even if this
+			// site's server has not started listening yet.
+			for ( const site of userData.sites ) {
+				portFinder.addUnavailablePort( site.port );
+			}
+			logger.reportStart( LoggerAction.ASSIGN_PORT, __( 'Assigning port…' ) );
+			const port = await portFinder.getOpenPort();
+			// translators: %d is the port number
+			logger.reportSuccess( sprintf( __( 'Port assigned: %d' ), port ) );
+
+			const site: ConfigSite = {
+				id: siteId,
+				name: siteName,
+				path: sitePath,
+				adminUsername,
+				adminPassword,
+				adminEmail,
+				port,
+				phpVersion,
+				fileAccess: options.fileAccess,
+				isWpAutoUpdating: options.wpVersion === DEFAULT_WORDPRESS_VERSION,
+				customDomain: options.customDomain,
+				enableHttps: options.enableHttps,
+				landingPage: normalizeLandingPage( blueprint?.landingPage ),
+			};
+
+			logger.reportStart( LoggerAction.SAVE_SITE, __( 'Saving site…' ) );
+
+			userData.sites.push( site );
+			sortSites( userData.sites );
+			return site;
+		} );
+		logger.reportSuccess( __( 'Site created successfully' ) );
+
+		if ( ! options.noStart ) {
+			logger.reportStart( LoggerAction.START_DAEMON, __( 'Starting process daemon…' ) );
+			await connectToDaemon();
+			logger.reportSuccess( __( 'Process daemon started' ) );
+
+			await setupCustomDomain( siteDetails, logger );
+
+			const startMessage = blueprint
+				? __( 'Starting WordPress server and applying Blueprint…' )
+				: __( 'Starting WordPress server…' );
+			logger.reportStart( LoggerAction.START_SITE, startMessage );
+			try {
+				await startWordPressServer( siteDetails, logger, 'create', {
+					wpVersion: options.wpVersion,
+					blueprint,
+					blueprintUri,
+					siteLanguage,
+				} );
+				logger.reportSuccess( __( 'WordPress server started' ) );
+
+				stripWpConfigDbConstants( sitePath );
+
+				siteDetails.running = true;
+				siteDetails.url = siteDetails.customDomain
+					? `${ siteDetails.enableHttps ? 'https' : 'http' }://${ siteDetails.customDomain }`
+					: `http://localhost:${ siteDetails.port }`;
+
+				if ( ! options.skipLogDetails ) {
+					logSiteDetails( siteDetails );
+				}
+				if ( ! options.skipBrowser ) {
+					await openSiteInBrowser( siteDetails );
+				}
+			} catch ( error ) {
+				await removeSiteFromConfig( siteDetails.id );
+				if ( ! isWordPressDirResult ) {
+					await fs.promises.rm( sitePath, { recursive: true, force: true } );
+				}
+				throw new LoggerError( __( 'Failed to start WordPress server' ), error );
+			}
+		} else {
+			logger.reportStart( LoggerAction.START_DAEMON, __( 'Starting process daemon…' ) );
+			await connectToDaemon();
+			logger.reportSuccess( __( 'Process daemon started' ) );
+
+			logger.reportStart(
+				LoggerAction.START_SITE,
+				blueprint ? __( 'Applying Blueprint…' ) : __( 'Setting up WordPress…' )
+			);
+			try {
+				if ( blueprint && ! blueprintUri ) {
+					throw new LoggerError( __( 'Blueprint source path is missing' ) );
+				}
+				await setUpSite( siteDetails, logger, {
+					wpVersion: options.wpVersion,
+					blueprint,
+					blueprintUri,
+					siteLanguage,
+				} );
+				logger.reportSuccess(
+					blueprint ? __( 'Blueprint applied successfully' ) : __( 'WordPress set up' )
+				);
+
+				stripWpConfigDbConstants( sitePath );
+			} catch ( error ) {
+				await removeSiteFromConfig( siteDetails.id );
+				if ( ! isWordPressDirResult ) {
+					await fs.promises.rm( sitePath, { recursive: true, force: true } );
+				}
+				const message = blueprint
+					? __( 'Failed to apply Blueprint' )
+					: __( 'Failed to set up WordPress' );
+				throw new LoggerError( message, error );
+			}
+			console.log( '' );
+			console.log( __( 'Site created successfully' ) );
+			console.log( '' );
+			if ( ! options.skipLogDetails ) {
+				logSiteDetails( siteDetails );
+			}
+			console.log( __( 'Run "studio start" to start the site.' ) );
+		}
+
+		logger.reportResult( {
+			...siteDetails,
+			url: getSiteUrl( siteDetails ),
+			running: siteDetails.running === true,
+		} );
+
+		await emitCliEvent( { event: SITE_EVENTS.CREATED, data: { siteId: siteDetails.id } } );
+	} finally {
+		await disconnectFromDaemon();
+	}
+}
+
+function stripWpConfigDbConstants( sitePath: string ): void {
+	const wpConfigPath = path.join( sitePath, 'wp-config.php' );
+	if ( ! fs.existsSync( wpConfigPath ) ) {
+		return;
+	}
+	const content = fs.readFileSync( wpConfigPath, 'utf-8' );
+	if ( hasDefaultDbBlock( content ) ) {
+		fs.writeFileSync( wpConfigPath, removeDbConstants( content ), 'utf-8' );
+	}
+}
+
+export async function commandHandler( argv: CommandArgs< typeof builder > ) {
+	let siteName = argv.name;
+	let sitePath = argv.path;
+	let wpVersion = argv.wp;
+	let phpVersion = argv.php;
+	let customDomain = argv.domain;
+	let enableHttps = !! argv.https;
+	let adminUsername = argv.adminUsername;
+	let adminPassword = argv.adminPassword;
+	let adminEmail = argv.adminEmail;
+	const fileAccess = argv.fileAccess;
+
+	// Validate and resolve the WordPress version against available versions before prompting
+	if ( wpVersion && wpVersion !== 'latest' && wpVersion !== 'nightly' ) {
+		try {
+			defaultLogger.reportStart( LoggerAction.VALIDATE, __( 'Checking WordPress version…' ) );
+			const availableVersions = await fetchWordPressVersions();
+			const matchedVersion = availableVersions.find(
+				( v ) => v.value === wpVersion || v.value.startsWith( wpVersion + '.' )
+			);
+			if ( ! matchedVersion ) {
+				const versionLabels = availableVersions
+					.filter( ( v ) => v.value !== 'latest' )
+					.map( ( v ) => v.label );
+				defaultLogger.reportError(
+					new LoggerError(
+						sprintf(
+							/* translators: %1$s: requested version, %2$s: list of available versions */
+							__( 'WordPress version "%1$s" is not available. Available versions: %2$s' ),
+							wpVersion,
+							versionLabels.join( ', ' )
+						)
+					)
+				);
+				return;
+			}
+			// Resolve short versions to full versions (e.g. "6.7" → "6.7.2")
+			if ( matchedVersion.value !== wpVersion ) {
+				defaultLogger.reportSuccess(
+					sprintf(
+						/* translators: %1$s: requested version, %2$s: resolved version */
+						__( 'WordPress version: %1$s → %2$s' ),
+						wpVersion,
+						matchedVersion.value
+					)
+				);
+			} else {
+				defaultLogger.reportSuccess(
+					sprintf(
+						/* translators: %s: WordPress version */
+						__( 'WordPress version: %s' ),
+						wpVersion
+					)
+				);
+			}
+			wpVersion = matchedVersion.value;
+		} catch {
+			// If we can't fetch versions (network issue), let it proceed and fail later
+		}
+	}
+
+	try {
+		if ( process.stdin.isTTY ) {
+			if ( ! siteName ) {
+				const defaultName = await generateSiteName();
+				siteName = await input( {
+					message: __( 'Site name:' ),
+					default: defaultName,
+				} );
+			}
+
+			const pathWasExplicitlyProvided = sitePath !== process.cwd();
+			if ( ! pathWasExplicitlyProvided ) {
+				const suggestedPath = getDefaultSitePath( siteName || __( 'My WordPress Website' ) );
+				const promptedPath = await input( {
+					message: __( 'Site path:' ),
+					default: suggestedPath,
+				} );
+				sitePath = path.resolve( untildify( promptedPath ) );
+			}
+
+			if ( ! wpVersion ) {
+				let wpChoices: { name: string; value: string }[];
+				try {
+					const versions = await fetchWordPressVersions();
+					wpChoices = versions.map( ( v ) => ( {
+						name:
+							v.value === DEFAULT_WORDPRESS_VERSION
+								? sprintf( __( 'Auto-update (%s)' ), v.label )
+								: v.label,
+						value: v.value,
+					} ) );
+				} catch {
+					// Offline or API failure — offer only the auto-update mode
+					wpChoices = [
+						{
+							name: __( 'Auto-update (recommended)' ),
+							value: DEFAULT_WORDPRESS_VERSION,
+						},
+					];
+				}
+				wpVersion = await select( {
+					message: __( 'WordPress version:' ),
+					choices: wpChoices,
+					default: DEFAULT_WORDPRESS_VERSION,
+					loop: false,
+				} );
+			}
+
+			if ( ! phpVersion ) {
+				phpVersion = await select( {
+					message: __( 'PHP version:' ),
+					choices: SupportedPHPVersions.map( ( v ) => ( {
+						name: v === RecommendedPHPVersion ? sprintf( __( '%s (recommended)' ), v ) : v,
+						value: v,
+					} ) ),
+					default: RecommendedPHPVersion,
+				} );
+			}
+
+			if ( ! customDomain ) {
+				const cliConfig = await readConfig();
+				const existingDomains = cliConfig.sites
+					.map( ( site ) => site.customDomain )
+					.filter( ( domain ): domain is string => Boolean( domain ) );
+
+				customDomain = await input( {
+					message: __( 'Custom domain (leave empty to skip):' ),
+					validate: ( value ) =>
+						getDomainNameValidationError( !! value, value, existingDomains ) || true,
+				} );
+			}
+
+			if ( customDomain && ! argv.https ) {
+				enableHttps = await confirm( {
+					message: __( 'Enable HTTPS?' ),
+					default: false,
+				} );
+			}
+
+			if ( ! adminUsername ) {
+				adminUsername = await input( {
+					message: __( 'Admin username:' ),
+					default: 'admin',
+					validate: ( value ) => validateAdminUsername( value ) || true,
+				} );
+			}
+
+			if ( ! adminPassword ) {
+				adminPassword = await password( {
+					message: __( 'Admin password (leave empty to auto-generate):' ),
+					mask: true,
+				} );
+				if ( ! adminPassword ) {
+					adminPassword = undefined;
+				}
+			}
+
+			if ( ! adminEmail ) {
+				adminEmail = await input( {
+					message: __( 'Admin email:' ),
+					default: 'admin@localhost.com',
+					validate: ( value ) => validateAdminEmail( value ) || true,
+				} );
+			}
+		}
+	} catch {
+		// User cancelled the prompt (Ctrl+C)
+		return;
+	}
+
+	// Apply defaults for non-interactive mode when flags weren't provided
+	wpVersion = wpVersion ?? DEFAULT_WORDPRESS_VERSION;
+
+	const config: CreateCommandOptions = {
+		name: siteName,
+		siteId: argv.id,
+		wpVersion,
+		phpVersion: phpVersion ?? RecommendedPHPVersion,
+		fileAccess,
+		customDomain,
+		enableHttps,
+		adminUsername,
+		adminPassword,
+		adminEmail,
+		noStart: ! argv.start,
+		skipBrowser: !! argv.skipBrowser,
+		skipLogDetails: !! argv.skipLogDetails,
+	};
+
+	try {
+		await using openedBlueprint = argv.blueprint
+			? await openBlueprintSource( untildify( argv.blueprint ) )
+			: undefined;
+		if ( openedBlueprint ) {
+			config.blueprint = { contents: openedBlueprint.blueprint, uri: openedBlueprint.path };
+		}
+
+		await runCommand( sitePath, config );
+	} catch ( error ) {
+		if ( error instanceof LoggerError ) {
+			defaultLogger.reportError( error );
+		} else {
+			const loggerError = new LoggerError( __( 'Failed to create site' ), error );
+			defaultLogger.reportError( loggerError );
+		}
+	}
+}

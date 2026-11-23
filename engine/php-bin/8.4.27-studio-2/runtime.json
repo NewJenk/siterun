@@ -1,0 +1,12 @@
+{
+  "phpVersion": "8.4.27",
+  "packageVersion": "studio-2",
+  "packageId": "8.4.27-studio-2",
+  "phpMinor": "8.4",
+  "threadSafety": "nts",
+  "platform": "macos",
+  "arch": "aarch64",
+  "binary": "php",
+  "extensionDir": "ext",
+  "xdebug": "ext/xdebug.so"
+}

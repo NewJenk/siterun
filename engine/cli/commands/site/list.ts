@@ -1,0 +1,149 @@
+import { type SiteDetails } from '@studio/common/lib/cli-events';
+import { readConfig } from '@studio/common/lib/config/store';
+import { SiteCommandLoggerAction as LoggerAction } from '@studio/common/logger-actions';
+import { __, _n, sprintf } from '@wordpress/i18n';
+import CliTable3 from 'cli-table3';
+import { getSiteUrl } from 'cli/lib/cli-config/sites';
+import { connectToDaemon, disconnectFromDaemon } from 'cli/lib/daemon-client';
+import { getSiteDetails } from 'cli/lib/site-details';
+import { pickPublicSiteFields } from 'cli/lib/site-public-fields';
+import { getSitesRunningStatus } from 'cli/lib/site-utils';
+import { getColumnWidths, getPrettyPath } from 'cli/lib/utils';
+import { Logger, LoggerError } from 'cli/logger';
+import type { ConfigSite } from '@studio/common/lib/config/schema';
+import type { builder } from 'cli/commands/site/list.command';
+import type { CommandArgs } from 'cli/types';
+
+interface SiteListTableEntry {
+	id: string;
+	status: string;
+	name: string;
+	path: string;
+	url: string;
+}
+
+interface SiteListJsonEntry extends SiteDetails {
+	running: boolean;
+}
+
+async function getSiteListData( sites: ConfigSite[] ): Promise< {
+	tableEntries: SiteListTableEntry[];
+	jsonEntries: SiteListJsonEntry[];
+} > {
+	const tableEntries: SiteListTableEntry[] = [];
+	const jsonEntries: SiteListJsonEntry[] = [];
+
+	const runningStatus = await getSitesRunningStatus();
+	for ( const site of sites ) {
+		const running = runningStatus.get( site.id ) ?? false;
+		const url = getSiteUrl( site );
+		const status = running ? `🟢 ${ __( 'Online' ) }` : `🔴 ${ __( 'Offline' ) }`;
+
+		tableEntries.push( {
+			id: site.id,
+			status,
+			name: site.name,
+			path: getPrettyPath( site.path ),
+			url,
+		} );
+
+		jsonEntries.push( { ...getSiteDetails( site ), running } );
+	}
+
+	return { tableEntries, jsonEntries };
+}
+
+function displaySiteList(
+	data: { tableEntries: SiteListTableEntry[]; jsonEntries: SiteListJsonEntry[] },
+	format: 'table' | 'json'
+): void {
+	if ( format === 'table' ) {
+		const colWidths = getColumnWidths( [ 0.1, 0.2, 0.3, 0.4 ] );
+
+		const table = new CliTable3( {
+			head: [ __( 'Status' ), __( 'Name' ), __( 'Path' ), __( 'URL' ) ],
+			wordWrap: true,
+			wrapOnWordBoundary: false,
+			colWidths,
+			style: {
+				head: [],
+				border: [],
+			},
+		} );
+
+		table.push(
+			...data.tableEntries.map( ( site ) => [
+				site.status,
+				site.name,
+				site.path,
+				{ href: new URL( site.url ).toString(), content: site.url },
+			] )
+		);
+
+		console.log( table.toString() );
+	} else {
+		// stdout is for scripts, logs, and agents, so it only carries public fields. The
+		// desktop app reads the full record, credentials included, over IPC.
+		console.log( JSON.stringify( data.jsonEntries.map( pickPublicSiteFields ) ) );
+		logger.reportResult( data.jsonEntries );
+	}
+}
+
+const logger = new Logger< LoggerAction >();
+
+// The local sites as `--format json` prints them: public fields only.
+export async function listSites() {
+	const { sites } = await readConfig();
+	if ( sites.length === 0 ) {
+		return [];
+	}
+	await connectToDaemon();
+	try {
+		const { jsonEntries } = await getSiteListData( sites );
+		return jsonEntries.map( pickPublicSiteFields );
+	} finally {
+		await disconnectFromDaemon();
+	}
+}
+
+export async function runCommand( format: 'table' | 'json' ): Promise< void > {
+	try {
+		logger.reportStart( LoggerAction.LOAD_SITES, __( 'Loading sites…' ) );
+		const cliConfig = await readConfig();
+
+		if ( cliConfig.sites.length === 0 ) {
+			logger.reportSuccess( __( 'No sites found' ) );
+			if ( format === 'json' ) {
+				displaySiteList( { tableEntries: [], jsonEntries: [] }, format );
+			}
+			return;
+		}
+
+		const sitesMessage = sprintf(
+			_n( 'Found %d site', 'Found %d sites', cliConfig.sites.length ),
+			cliConfig.sites.length
+		);
+		logger.reportSuccess( sitesMessage );
+
+		logger.reportStart( LoggerAction.START_DAEMON, __( 'Connecting to process daemon…' ) );
+		await connectToDaemon();
+		logger.reportSuccess( __( 'Connected to process daemon' ) );
+
+		const siteListData = await getSiteListData( cliConfig.sites );
+		displaySiteList( siteListData, format );
+	} finally {
+		await disconnectFromDaemon();
+	}
+}
+export async function commandHandler( argv: CommandArgs< typeof builder > ) {
+	try {
+		await runCommand( argv.format );
+	} catch ( error ) {
+		if ( error instanceof LoggerError ) {
+			logger.reportError( error );
+		} else {
+			const loggerError = new LoggerError( __( 'Failed to list sites' ), error );
+			logger.reportError( loggerError );
+		}
+	}
+}

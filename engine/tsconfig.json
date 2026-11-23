@@ -1,0 +1,44 @@
+{
+	"compilerOptions": {
+		"target": "ES2022",
+		"module": "ES2022",
+		"moduleResolution": "Bundler",
+		"strict": true,
+		"allowJs": true,
+		"esModuleInterop": true,
+		"skipLibCheck": true,
+		"resolveJsonModule": true,
+		"noEmit": true,
+		"types": [
+			"node"
+		],
+		"baseUrl": ".",
+		"paths": {
+			"cli/*": [
+				"./cli/*"
+			],
+			"@studio/common/*": [
+				"./common/*"
+			],
+			"@studio/blueprints": [
+				"./blueprints/index.ts"
+			],
+			"@studio/blueprints/*": [
+				"./blueprints/*"
+			],
+			"@wp-playground/blueprints/blueprint-schema-validator": [
+				"../node_modules/@wp-playground/blueprints/blueprint-schema-validator"
+			]
+		},
+		"allowImportingTsExtensions": true
+	},
+	"include": [
+		"cli/**/*.ts",
+		"common/**/*.ts",
+		"blueprints/**/*.ts"
+	],
+	"exclude": [
+		"**/node_modules/**",
+		"**/dist/**"
+	]
+}

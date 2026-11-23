@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta
+			http-equiv="Content-Security-Policy"
+			content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+		/>
+		<meta http-equiv="X-Content-Type-Options" content="nosniff" />
+		<meta name="referrer" content="no-referrer" />
+		<meta http-equiv="Permissions-Policy" content="clipboard-read=(self), clipboard-write=(self)" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="color-scheme" content="light dark" />
+		<meta name="robots" content="noindex, nofollow" />
+		<!-- Before the design system has mounted, the page is painted with the
+		     dark seed directly. This is the one colour in the window that is not
+		     a token. -->
+		<style>
+			@media (prefers-color-scheme: dark) {
+				html:not([data-wpds-root-provider]) body {
+					background: #1e1e1e;
+				}
+			}
+		</style>
+		<link rel="stylesheet" href="./index.css" />
+		<title>siterun</title>
+	</head>
+	<body>
+		<div id="root"></div>
+		<script defer src="./index.js"></script>
+	</body>
+</html>
