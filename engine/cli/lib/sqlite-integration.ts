@@ -33,7 +33,7 @@ export async function isSqliteIntegrationInstalled( sitePath: string ) {
 }
 
 /**
- * Installs the SQLite integration for imported (reprint-pulled) sites when it's
+ * Installs the SQLite integration for imported (pulled) sites when it's
  * missing. Those sites wire SQLite through runtime.php and ship no db.php drop-in,
  * so keepSqliteIntegrationUpdated skips them — but tools that need the integration
  * discoverable in wp-content (e.g. `wp sqlite export`) can call this first.

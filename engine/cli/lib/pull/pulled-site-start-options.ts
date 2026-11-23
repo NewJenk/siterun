@@ -3,7 +3,7 @@ import path from 'path';
 import type { StartServerOptions } from 'cli/lib/wordpress-server-manager';
 
 /**
- * Prepends Reprint's `runtime.php`, which sets up the pulled database, and
+ * Prepends a pulled site's `runtime.php`, which sets up the pulled database, and
  * gives PHP access to the pull's files. Returns undefined for sites that
  * weren't pulled or have no `runtime.php`.
  */

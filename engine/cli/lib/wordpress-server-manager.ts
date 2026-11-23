@@ -28,7 +28,6 @@ import {
 	sendMessageToProcess,
 } from 'cli/lib/daemon-client';
 import { ensurePhpBinaryAvailable } from 'cli/lib/dependency-management/php-binary';
-import { isPhpMyAdminSupported } from 'cli/lib/native-php/phpmyadmin';
 import { getSiteDatabasePath, replaceMysql8OnlyCollations } from 'cli/lib/sqlite-collations';
 import { resetSqliteJournalModeToRollback } from 'cli/lib/sqlite-journal-mode';
 import { ProcessDescription, SITE_PROCESS_PREFIX } from 'cli/lib/types/process-manager-ipc';
@@ -82,7 +81,6 @@ function buildServerConfig(
 		port: site.port,
 		phpVersion: resolveSupportedPhpVersion( site.phpVersion ),
 		siteTitle: site.name,
-		phpMyAdminSupported: isPhpMyAdminSupported( site ),
 	};
 
 	if ( site.customDomain ) {
@@ -185,7 +183,7 @@ async function ensureSitePhpBinaryAvailable(
  * 5. Persist the process PID so running-status checks match the live process
  */
 /** The command that started the site, reported as `command` on `studio_site_start`. */
-export type SiteStartCommand = 'start' | 'create' | 'import' | 'pull' | 'config';
+export type SiteStartCommand = 'start' | 'create' | 'import' | 'config';
 
 export async function startWordPressServer(
 	site: ConfigSite,

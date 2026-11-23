@@ -40,7 +40,6 @@ export function getWordPressVersionPath( version: string ): string {
 
 type BundledManifest = {
 	wordpressVersion: string;
-	phpMyAdminHash: string;
 };
 
 let bundledManifest: BundledManifest | undefined;
@@ -65,11 +64,6 @@ export function getBundledWordPressZipPath(): string {
 	return path.join( getWpFilesPath(), 'latest', 'wordpress.zip' );
 }
 
-// reprint.phar ships read-only with the CLI bundle (downloaded into `wp-files` at build time).
-export function getReprintPharPath(): string {
-	return path.join( getWpFilesPath(), 'reprint', 'reprint.phar' );
-}
-
 // WP-CLI ships read-only with the CLI bundle. No writable cache needed.
 export function getWpCliPharPath(): string {
 	return path.join( getWpFilesPath(), 'wp-cli', WP_CLI_PHAR_FILENAME );
@@ -84,24 +78,6 @@ export function getSqliteCommandPath(): string {
 // `wp-content/languages/` directory.
 export function getLanguagePacksPath(): string {
 	return path.join( getWpFilesPath(), 'latest', 'languages' );
-}
-
-// AI instructions ship read-only with the CLI bundle and are installed into each site's
-// `.agents/skills/` directory on site create/start. No writable cache needed — the bundled
-// directory is treated as the source of truth.
-export function getAiInstructionsPath(): string {
-	return path.join( getWpFilesPath(), 'skills' );
-}
-
-// phpMyAdmin ships zipped, with everything under `phpmyadmin/`. Sites serve it from
-// `getPhpMyAdminVersionsPath()/<hash>`, where it's unpacked on first use; see `phpmyadmin.ts`.
-export function getBundledPhpMyAdminZipPath(): string {
-	return path.join( getWpFilesPath(), 'phpmyadmin.zip' );
-}
-
-// Not `server-files/phpmyadmin`: migration 04, in this CLI and older ones, deletes that path.
-export function getPhpMyAdminVersionsPath(): string {
-	return path.join( getServerFilesPath(), 'phpmyadmin-versions' );
 }
 
 export function getBlueprintsPharPath(): string {
@@ -123,18 +99,6 @@ export function getBundledWxrImportScriptPath(): string {
 // The `sendmail_path` script that saves the email a site sends (see `@studio/common/sites/site-email`).
 export function getBundledSendmailScriptPath(): string {
 	return path.join( getBundledPhpPath(), 'sendmail.php' );
-}
-
-// PHP driver that runs a Simply Static export from WP-CLI, see `lib/static-export.ts`.
-export function getBundledStaticExportScriptPath(): string {
-	return path.join( getBundledPhpPath(), 'static-export.php' );
-}
-
-// The Simply Static plugin's zip from WordPress.org, holding a `simply-static/` folder, saved into
-// `wp-files/` at install time like the wordpress-importer plugin below. Used to generate static
-// exports without installing it into the site.
-export function getBundledSimplyStaticZipPath(): string {
-	return path.join( getWpFilesPath(), 'simply-static.zip' );
 }
 
 // The official wordpress-importer plugin's zip, holding a `wordpress-importer/` folder, saved into

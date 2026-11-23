@@ -283,8 +283,8 @@ async function resolveSymlinkAllowlistEntry( linkPath: string ): Promise< string
 
 export async function collectSymlinkAllowlistEntries( dir: string ): Promise< string[] > {
 	// Neither `find` nor the Node walk descends through a symlink, so a
-	// symlinked root would yield only the link itself. A Reprint-pulled site's
-	// wp-content is exactly that: a link into Reprint's fs-root directory.
+	// symlinked root would yield only the link itself. A pulled site's
+	// wp-content is exactly that: a link into the pull's fs-root directory.
 	let root = dir;
 	try {
 		root = fs.realpathSync.native( dir );

@@ -325,7 +325,7 @@ export function getDefaultPhpArgs(
 		args.push( '-d', `disable_functions=${ PHP_DEFAULT_DISABLED_FUNCTIONS.join( ',' ) }` );
 	}
 
-	// Run a PHP file before the main script — used to inject reprint's generated
+	// Run a PHP file before the main script — used to inject a pulled site's generated
 	// runtime.php (constants, SQLite loader, upload proxy) into imported sites
 	// without modifying their wp-config.php.
 	if ( autoPrependFile ) {

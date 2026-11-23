@@ -34,7 +34,6 @@ export const siteDetailsSchema = z.object( {
 	landingPage: z.string().optional(),
 	operation: siteOperationSchema.optional(),
 	emailPath: z.string().optional(),
-	phpMyAdminSupported: z.boolean().optional(),
 	sortOrder: z.number().optional(),
 	autoStart: z.boolean().optional(),
 	hideFrontendAdminBar: z.boolean().optional()

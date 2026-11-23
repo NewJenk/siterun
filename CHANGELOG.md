@@ -21,6 +21,7 @@ Every user-visible change goes here. Keep the newest entry first and say what ch
 
 ### Changed
 
+- **Cleared out the last of the unused engine code.** phpMyAdmin was still in the engine with an 11 MB bundle, even though the app has its own database browser. It's gone, along with the Reprint and Simply Static leftovers from pull and static export. The database browser is the only database UI now.
 - **Changelog cleanup.** Removed the old 0.1.0 notes about an external engine, a Blueprint library and usage counts. They describe intermediate builds, not the released app.
 - **GPL-3.0-or-later.** The app, its engine copy and its license file are now licensed under GPL version 3 or later, rather than GPL version 2 or later.
 - **A smaller menu bar.** The app menu now holds only About, Settings and Quit; File holds New Site and Close. Edit, View, Window and Help are gone, including developer tools, reload, zoom and the hide/show-all items. Copy, cut, paste, select all, undo and redo still work through their keyboard shortcuts.

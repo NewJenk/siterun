@@ -27,10 +27,6 @@ import {
 	SiteStartPhase,
 } from 'cli/lib/types/wordpress-server-ipc';
 import { requestSetAdminCredentials } from './lib/admin-credentials';
-import {
-	getPhpMyAdminPath,
-	installBundledPhpMyAdmin,
-} from './lib/dependency-management/phpmyadmin';
 import { runBlueprint } from './lib/native-php/blueprints';
 import { containsPath, dropCoveredPaths } from './lib/native-php/open-basedir';
 import {
@@ -39,11 +35,6 @@ import {
 	stopPhpChild,
 	waitForChildSpawn,
 } from './lib/native-php/php-process';
-import {
-	getNativePhpMyAdminWpEnvPath,
-	getPhpMyAdminSessionPath,
-	writeNativePhpMyAdminWpEnv,
-} from './lib/native-php/phpmyadmin';
 import {
 	ensureWpConfig,
 	installWordPress,
@@ -158,20 +149,9 @@ function errorToConsole( ...args: Parameters< typeof console.error > ) {
 	console.error( `[PHP Server]`, ...args );
 }
 
-// phpMyAdmin pins to worker 0 because its file-based session store belongs to a
-// single worker. WordPress keeps its state in the database, so every other
-// request, POSTs included, balances across the pool.
-export function shouldUsePrimaryWorker( req: http.IncomingMessage ): boolean {
-	return ( req.url ?? '/' ).startsWith( '/phpmyadmin' );
-}
-
-function pickPhpWorker( req: http.IncomingMessage ): { index: number; port: number } {
+function pickPhpWorker(): { index: number; port: number } {
 	if ( phpWorkerPorts.length === 0 ) {
 		throw new Error( 'No PHP worker ports are available' );
-	}
-
-	if ( shouldUsePrimaryWorker( req ) ) {
-		return { index: 0, port: phpWorkerPorts[ 0 ] };
 	}
 
 	const bestIndex = phpWorkerRequestTracker.getFirstFreeWorker();
@@ -410,7 +390,7 @@ function proxyRequestToPhpWorker(
 
 	let worker: { index: number; port: number };
 	try {
-		worker = pickPhpWorker( req );
+		worker = pickPhpWorker();
 	} catch ( error ) {
 		errorToConsole(
 			`Failed to select PHP worker: ${
@@ -500,7 +480,7 @@ export async function startServer( config: ServerConfig, signal: AbortSignal ): 
 	const stopSignal = AbortSignal.any( [ signal, startupAbortController.signal ] );
 
 	// Sites imported by `studio pull` arrive with WordPress already
-	// installed and a database already in place; reprint's auto_prepend_file
+	// installed and a database already in place; a pulled site's auto_prepend_file
 	// owns their constants and SQLite wiring. So we skip wp-config rewriting,
 	// the WordPress installer, and Blueprint execution — running any of them
 	// against the imported database would be wrong — and just write Studio's
@@ -543,21 +523,11 @@ export async function startServer( config: ServerConfig, signal: AbortSignal ): 
 			}
 		}
 
-		void installBundledPhpMyAdmin().catch( ( error ) =>
-			errorToConsole( 'Failed to unpack phpMyAdmin:', error )
-		);
-		const phpMyAdminPath = getPhpMyAdminPath();
-
 		// With "all files" access the allowlist stays empty, which disables
 		// open_basedir entirely (see getDefaultPhpArgs).
 		if ( isFileAccessRestricted( config ) ) {
 			staticOpenBasedirAllowlist.add( config.sitePath );
 			staticOpenBasedirAllowlist.add( ROUTER_PATH );
-			if ( phpMyAdminPath ) {
-				staticOpenBasedirAllowlist.add( phpMyAdminPath );
-			}
-			staticOpenBasedirAllowlist.add( getNativePhpMyAdminWpEnvPath( config ) );
-			staticOpenBasedirAllowlist.add( getPhpMyAdminSessionPath( config ) );
 			// The whole root, not this start's hashed folder: a WP-CLI run from another
 			// Studio version or with other settings can repoint the loader while the
 			// server runs.
@@ -571,7 +541,7 @@ export async function startServer( config: ServerConfig, signal: AbortSignal ): 
 			// Snapshot existing symlink targets so open_basedir grants them upfront. New
 			// symlinks added while the server runs are picked up by startSymlinkWatcher
 			// below and trigger a debounced restart with an extended allowlist.
-			// wp-content is scanned separately: on a Reprint-pulled site it is a symlink
+			// wp-content is scanned separately: on a pulled site it is a symlink
 			// into the pull's raw directory, and a scan of the site alone stops on that
 			// link and never sees the symlinked plugins and themes behind it.
 			symlinkOpenBasedirAllowlist = await timePhase(
@@ -649,7 +619,6 @@ async function doStartServer(
 
 	const workersStartedAt = Date.now();
 	try {
-		const phpMyAdminWpEnvPath = await writeNativePhpMyAdminWpEnv( config );
 		const siteUrl = config.absoluteUrl || `http://localhost:${ config.port }`;
 		const autoPrependFile = writeSiteUrlPrependFile( siteUrl, config.autoPrependFile );
 		// Created up front so the folder opens from the app before the site sends any email.
@@ -673,12 +642,6 @@ async function doStartServer(
 			const serverChild = spawnPhpProcess( [ '-S', phpAddress, ROUTER_PATH ], {
 				phpVersion,
 				siteFolder: config.sitePath,
-				env: {
-					STUDIO_PHPMYADMIN_PATH: getPhpMyAdminPath() ?? '',
-					STUDIO_PHPMYADMIN_SUPPORTED: config.phpMyAdminSupported === false ? '0' : '1',
-					STUDIO_NATIVE_PHPMYADMIN_WP_ENV_PATH: phpMyAdminWpEnvPath,
-					STUDIO_PHPMYADMIN_SESSION_PATH: getPhpMyAdminSessionPath( config ),
-				},
 				onlyPathsThatPhpCanAccess: openBasedirAllowlist,
 				disallowRiskyFunctions: isFileAccessRestricted( config ),
 				enableXdebug: config.enableXdebug,

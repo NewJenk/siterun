@@ -48,7 +48,6 @@ function getObsoleteServerFiles(): string[] {
 	return [
 		'sqlite-database-integration',
 		'sqlite-command',
-		'phpmyadmin',
 		'wp-cli.phar',
 		path.join( 'wordpress-versions', 'latest', 'available-site-translations.json' ),
 		'language-packs',

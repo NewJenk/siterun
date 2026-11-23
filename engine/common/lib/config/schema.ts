@@ -44,7 +44,7 @@ const preferencesSchema = z.looseObject( {
 } );
 
 export const configSiteSchema = siteDetailsSchema
-	.omit( { emailPath: true, phpMyAdminSupported: true } )
+	.omit( { emailPath: true } )
 	.extend( {
 		url: z.string().optional(),
 		latestCliPid: z.number().optional(),

@@ -194,7 +194,7 @@ Its data lives in this app's folder. Before this change it lived in `~/.studio`,
 | Engine code | An external checkout | `engine/` in this repository |
 | Site list and engine config | `~/.studio/config.json` | `<app data>/engine/config.json` |
 | PHP binary | `~/.studio/php-bin` | `<app data>/engine/php-bin` |
-| WordPress versions and phpMyAdmin | `~/.studio/server-files` | `<app data>/engine/server-files` |
+| WordPress versions | `~/.studio/server-files` | `<app data>/engine/server-files` |
 | Must-use plugins | `~/.studio/mu-plugins` | `<app data>/engine/mu-plugins` |
 | Captured site email | `~/.studio/email` | `<app data>/engine/email` |
 | Process-manager sockets and logs | `~/.studio/daemon` | `<app data>/engine/daemon` |

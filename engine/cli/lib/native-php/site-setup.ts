@@ -108,7 +108,7 @@ ${ chained }
 /**
  * Writes the auto_prepend_file that forces WordPress to serve from the local
  * URL. Returns the path to use as auto_prepend_file. For imported sites it
- * chains to reprint's own runtime.php so that prepend still runs.
+ * chains to the pulled site's runtime.php so that prepend still runs.
  */
 export function writeSiteUrlPrependFile(
 	siteUrl: string,
