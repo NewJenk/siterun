@@ -40,7 +40,7 @@ export function AboutDialog( { info, open, onClose, onCopy, onRetry }: Props ) {
 						<Stack direction="column" gap="xs">
 							<SiterunWordmark className="about-wordmark" />
 							<Text variant="body-sm" className="muted">
-								{ __( 'Version', 'siterun' ) } { info?.version ?? '…' } · { __( 'GPL-2.0-or-later', 'siterun' ) }
+								{ __( 'Version', 'siterun' ) } { info?.version ?? '…' } · { __( 'GPL-3.0-only', 'siterun' ) }
 							</Text>
 						</Stack>
 						<Text variant="body-md">

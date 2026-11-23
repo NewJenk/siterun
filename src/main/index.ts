@@ -80,7 +80,7 @@ app.whenReady().then( async () => {
 	app.setAboutPanelOptions( {
 		applicationName: 'siterun',
 		applicationVersion: app.getVersion(),
-		copyright: 'GPL-2.0-or-later'
+		copyright: 'GPL-3.0-only'
 	} );
 	if ( process.platform === 'win32' ) {
 		app.setAppUserModelId( 'app.siterun.desktop' );
