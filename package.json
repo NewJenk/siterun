@@ -93,7 +93,8 @@
 		"productName": "siterun",
 		"artifactName": "siterun-${version}-${os}-${arch}.${ext}",
 		"directories": {
-			"buildResources": "build"
+			"buildResources": "build",
+			"output": "release"
 		},
 		"files": [
 			"dist/**/*",
