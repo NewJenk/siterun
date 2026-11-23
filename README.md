@@ -15,7 +15,7 @@ It stands on the excellent work Automattic has done on local WordPress tooling. 
 
 The first launch prepares one shared runtime. After that, a site is ready in seconds.
 
-**No telemetry. No analytics. No account.** Nothing leaves your machine unless you ask for something.
+**No telemetry. No analytics. No account.** Nothing phones home in the background.
 
 This is early, and it is deliberately small. The parts that matter are here. Enjoy.
 
@@ -35,7 +35,7 @@ This is early, and it is deliberately small. The parts that matter are here. Enj
 
 ## Where everything lives
 
-This is the part that makes it different from the old local development stack. There is no system-wide PHP, MySQL, Apache or control panel. There is no installer that scatters a runtime through your home folder. There is no login item or background service after you quit.
+This is what makes it different from the old local development stack. There is no system-wide PHP, MySQL, Apache or control panel. There is no installer that scatters a runtime through your home folder. There is no login item or background service after you quit.
 
 A site is a normal folder. The app is one normal folder. That is the whole map.
 
@@ -61,11 +61,11 @@ It contains:
 - `preferences.json`: theme, default site folder and privacy choice.
 - Electron's own cache and local storage.
 
-One runtime serves every site. It is downloaded or copied once, not once per site.
+One runtime serves every site. It's downloaded or copied once, not once per site.
 
-An earlier build used a different data-folder name beside this one. The first launch of siterun moves the preferences, engine data and database backups across, and leaves the old folder's browser caches behind.
+If you used an earlier build, it kept its data in a differently named folder beside this one. The first launch of siterun moves the preferences, engine data and database backups across, and leaves the old browser caches behind.
 
-That `engine/` holds the engine's **data**. Its code is in this repository's [`engine/`](engine) folder; both are described in [What is the engine?](#what-is-the-engine).
+The `engine/` folder in the app data is the engine's **data**. Its code is in this repository's [`engine/`](engine) folder. Both are described in [What is the engine?](#what-is-the-engine).
 
 ### Temporary files
 
@@ -80,13 +80,13 @@ A plain local site touches nothing outside its folder and the app folder. Two op
 
 Deleting a site with its files moves the folder to the operating system's trash, so it is still recoverable.
 
-### If you already had a shared Studio folder
+### If you already had `~/.studio`
 
-The first launch copies the site list and the shared runtime from the existing `~/.studio` folder into this app's folder. From then on, this app does not write to `~/.studio`. The old installation keeps its own copy.
+The first launch copies the site list and shared runtime from `~/.studio` into this app's folder. After that, siterun doesn't write there. The old install keeps its own copy.
 
 ## Requirements
 
-This is a working preview, not a signed installer yet.
+This is a working preview, not a signed installer.
 
 - Node 24.
 
@@ -153,7 +153,7 @@ tests          node:test for the pure logic
 
 ## What is the engine?
 
-The engine is a Node program adapted from Automattic's local WordPress tooling. It is the part that actually knows how to run WordPress:
+The engine is a Node program adapted from Automattic's local WordPress tooling. It's the part that actually runs WordPress:
 
 - it reads and writes the site list;
 - it creates a site and copies WordPress into it;
@@ -161,9 +161,9 @@ The engine is a Node program adapted from Automattic's local WordPress tooling. 
 - it runs WP-CLI, imports and exports, and opens blueprints;
 - it sets up custom domains, the hosts file and HTTPS certificates.
 
-siterun does not reimplement any of that. The engine's source lives in `engine/`. The Electron main process forks the built CLI and speaks its IPC protocol, and the React window talks to the main process. The renderer never runs the engine directly.
+We don't reimplement any of that. The engine's source lives in `engine/`. The Electron main process forks the built CLI and speaks its IPC protocol, and the React window talks to the main process. The renderer never runs the engine directly.
 
-The copy keeps the local-site commands and drops the surfaces this app does not have: the AI agent, account sign-in, sync, previews, MCP and `studio ui`. The commands left are create, list, start, stop, status, delete, config, import/export, WP-CLI, blueprints and the hidden daemon shutdown.
+This copy keeps the local-site commands and drops the surfaces the app doesn't have: the AI agent, account sign-in, sync, previews, MCP and `studio ui`. The commands left are create, list, start, stop, status, delete, config, import/export, WP-CLI, blueprints and the hidden daemon shutdown.
 
 ```
 siterun (Electron)
@@ -184,7 +184,7 @@ The engine is not a system service and it is not installed globally. It is a loc
 
 The engine's code is in this repository. Development builds load `engine/dist/cli/main.mjs`; a packaged build loads its copy from `resources/cli`. Building it is `npm run engine:build`, which `npm start` runs for you.
 
-Its data lives in this app's folder. Before this change it lived in `~/.studio`, the shared folder an earlier Studio install uses. That meant this app shared a site list, PHP runtime and daemon with another product. Now it lives in this app's folder:
+Its data lives in this app's folder, not in `~/.studio`. That means no shared site list, PHP runtime or daemon with another Studio install.
 
 | What | Before | Now |
 | --- | --- | --- |
@@ -198,13 +198,11 @@ Its data lives in this app's folder. Before this change it lived in `~/.studio`,
 | Database backups | `~/Studio/.backups` | `<app data>/backups` |
 | Site files | The folder you choose | Unchanged |
 
-The first launch copies the existing `~/.studio` site list and runtime into `<app data>/engine`, so sites you already had continue to appear. After that, this app does not write to `~/.studio`. The old installation keeps its own copy.
-
 `<app data>` is `~/Library/Application Support/siterun` on macOS, `%APPDATA%\siterun` on Windows and `~/.config/siterun` on Linux.
 
-- **Site operations are the engine's.** The app forks it and speaks its IPC protocol, so there is one implementation of creating WordPress, starting PHP and managing a site.
+- **The engine owns site operations.** The app forks it and speaks its IPC protocol, so there is one implementation of creating WordPress, starting PHP and managing a site.
 - **No state mirror.** The engine's config is the source of truth for the site list; the window reads it on demand and after every mutation.
-- **The database is a worker.** SQLite is read through Node's own driver in a separate thread. The default connection is read-only. Write mode takes a backup, requires the site to be stopped, allows one statement at a time and closes the writable connection when it is turned off.
+- **Database queries run in a worker.** SQLite is read through Node's own driver in a separate thread. The default connection is read-only. Write mode takes a backup, requires the site to be stopped, allows one statement at a time and closes the writable connection when it is turned off.
 - **Security.** The renderer is sandboxed with context isolation, no Node integration, a pinned navigation target, a strict CSP and an allowlist of external URL schemes. Every IPC handler checks the sender. Site paths and database paths come from the engine, never from the window.
 - **Theming.** All styling uses the `--wpds-*` tokens from `@wordpress/theme` and the components from `@wordpress/ui`, `@wordpress/admin-ui` and `@wordpress/dataviews`. ESLint refuses hard-coded colours and inline styles; stylelint refuses non-token colours and unknown tokens.
 - **Updates.** `SITERUN_UPDATE_FEED` can point at a JSON document (`{ version, url, notes }`); the app shows a banner when a newer version exists. Signing and in-place updates are a release decision, not something this build pretends to do.
@@ -213,11 +211,11 @@ The first launch copies the existing `~/.studio` site list and runtime into `<ap
 
 No account. No telemetry. No analytics. No AI. No sync. No remote previews.
 
-There is no usage-count code, no installation id, no analytics endpoint and no preference to turn one on. Nothing leaves the machine unless you ask for something.
+There's no usage-count code, no installation id, no analytics endpoint and no preference to turn one on. Nothing is sent in the background. The only network requests are the ones needed for something you do in the app.
 
-Update checks are opt-in to configure: without a feed URL, the app makes no update request.
+Update checks are opt-in. Without a feed URL, the app makes no update request.
 
-The engine makes a network request only when it has to fetch something you asked for:
+The engine only makes a network request when it's fetching something you asked for:
 
 - `api.wordpress.org` for the list of WordPress versions, and `wordpress.org` when you choose a version other than the bundled one.
 - The PHP binary CDN when you choose a PHP version that is not bundled. The bundled version runs offline.
@@ -231,7 +229,7 @@ Blueprints from a file, folder or zip never leave the machine.
 - Updates are a check and a download link, not an in-place update.
 - Sites open in your browser. There is no embedded preview yet.
 - Windows and Linux have not been exercised on a real machine.
-- The first launch copies or downloads the shared runtime, so it takes longer than every launch after it.
+- The first launch prepares the shared runtime, so it takes longer than every launch after it.
 
 ## Changelog
 

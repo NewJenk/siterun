@@ -1,6 +1,6 @@
 # Security policy
 
-siterun runs WordPress and PHP on your own machine. It has no account, no telemetry and no remote service behind it, so the security boundary is the app, the engine and the files they touch.
+siterun runs WordPress and PHP on your own machine. There's no account, no telemetry and no remote service behind it. The security boundary is the app, the engine and the files they touch.
 
 ## Supported versions
 
