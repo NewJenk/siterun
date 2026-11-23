@@ -21,6 +21,7 @@ Every user-visible change goes here. Keep the newest entry first and say what ch
 
 ### Changed
 
+- **Changelog cleanup.** Removed the old 0.1.0 notes about an external engine, a Blueprint library and usage counts. They describe intermediate builds, not the released app.
 - **GPL-3.0-or-later.** The app, its engine copy and its license file are now licensed under GPL version 3 or later, rather than GPL version 2 or later.
 - **A smaller menu bar.** The app menu now holds only About, Settings and Quit; File holds New Site and Close. Edit, View, Window and Help are gone, including developer tools, reload, zoom and the hide/show-all items. Copy, cut, paste, select all, undo and redo still work through their keyboard shortcuts.
 - **No telemetry. Ever.** All usage-count code, the telemetry preference and the installation id are gone. The app has no analytics endpoint and nothing to opt in to.
@@ -64,20 +65,18 @@ The first build of siterun: a separate Electron app, with no AI, no account, no 
 ### Added
 
 - Sites list, create, start, stop, copy, delete and reorder-free selection.
-- Create from a blank site, a Blueprint library entry, a Blueprint file, or a backup.
+- Create from a blank site, a Blueprint file, or a backup.
 - Site page with local URL, WP Admin, admin credentials, WordPress and PHP versions, port, folder and environment.
 - Site settings for PHP, WordPress, custom domain, HTTPS, environment, admin email, Xdebug, debug log, debug display and script debug.
 - Full-site, content-only and database-only export; restore from a backup.
 - WP-CLI console.
 - Open site, WP Admin, folder and terminal.
 - Light, dark and system themes using the WordPress design system tokens.
-- Anonymous usage counts, off by default; update checks against a configurable feed.
 - Sandboxed renderer, context isolation, strict CSP, pinned navigation, external URL allowlist and sender-checked IPC.
-- WordPress ESLint rules, TypeScript strict mode, design-token Stylelint rules, 17 unit tests, an Electron smoke test and an opt-in real-site journey.
+- WordPress ESLint rules, TypeScript strict mode, design-token Stylelint rules, 22 unit tests, an Electron smoke test and an opt-in real-site journey.
 
 ### Known limitations
 
-- The site engine is still an external Studio CLI checkout. It contains dormant AI and account commands that this app never calls. Extracting a smaller engine is the next architectural piece of work.
 - Updates are a check and a download link, not an in-place update. Signing and a publish target are a release decision.
 - The development app must be started from Terminal with `npm start`. Launching the raw Electron binary through Finder or `open` can be refused by macOS privacy protection on `~/Downloads`, which surfaces as an `EPERM` reading `package.json`. A packaged build in Applications does not have this problem.
 - Windows and Linux have not been exercised on a real machine yet.
