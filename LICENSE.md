@@ -1,5 +1,7 @@
 # The GNU General Public License, Version 3, 29 June 2007 (GPLv3)
 
+siterun is licensed under version 3 of the GNU General Public License, or (at your option) any later version.
+
 > Copyright (C) 2007 Free Software Foundation, Inc. <https://fsf.org/>
 > Everyone is permitted to copy and distribute verbatim copies of this license document, but changing it is not allowed.
 

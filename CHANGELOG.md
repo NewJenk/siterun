@@ -21,7 +21,7 @@ Every user-visible change goes here. Keep the newest entry first and say what ch
 
 ### Changed
 
-- **GPL-3.0-only.** The app, its engine copy and its license file are now licensed under GPL version 3.0 only, rather than GPL version 2 or later.
+- **GPL-3.0-or-later.** The app, its engine copy and its license file are now licensed under GPL version 3 or later, rather than GPL version 2 or later.
 - **A smaller menu bar.** The app menu now holds only About, Settings and Quit; File holds New Site and Close. Edit, View, Window and Help are gone, including developer tools, reload, zoom and the hide/show-all items. Copy, cut, paste, select all, undo and redo still work through their keyboard shortcuts.
 - **No telemetry. Ever.** All usage-count code, the telemetry preference and the installation id are gone. The app has no analytics endpoint and nothing to opt in to.
 - **New sites default to `~/siterun`.** The old default folder name is treated as unset, so the first site created after this change lands in the new folder.

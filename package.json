@@ -3,7 +3,7 @@
 	"productName": "siterun",
 	"version": "0.1.0",
 	"private": true,
-	"license": "GPL-3.0-only",
+	"license": "GPL-3.0-or-later",
 	"description": "The simplest way to run WordPress locally.",
 	"main": "dist/main/index.js",
 	"engines": {
