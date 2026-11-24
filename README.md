@@ -21,7 +21,7 @@ This is early, and it is deliberately small. The parts that matter are here. Enj
 
 ## Download
 
-Download the latest macOS build from [GitHub Releases](https://github.com/NewJenk/siterun/releases/latest). Open the DMG, drag siterun into Applications, then launch it. The app and the disk image are signed with a Developer ID and notarized by Apple, so macOS opens them without a warning.
+Download the latest macOS build from [GitHub Releases](https://github.com/NewJenk/siterun/releases/latest). Open the DMG, drag siterun into Applications, then launch it. The app and the disk image are signed with a Developer ID and notarised by Apple, so macOS opens them without a warning.
 
 To build it yourself, see [Run it](#run-it).
 
@@ -140,12 +140,12 @@ SITERUN_E2E_SITE=1 npm run e2e -- site-journey
 ```sh
 npm run package   # an unpacked app in release/
 npm run make      # an installer for the current platform
-npm run make:mac  # a signed and notarized macOS DMG and zip
+npm run make:mac  # a signed and notarised macOS DMG and zip
 ```
 
 All three build the engine and copy it to `vendor/cli`, then electron-builder ships that folder as `resources/cli`. The packaged app needs no checkout and no separate engine install.
 
-`npm run make:mac` signs the app, the bundled PHP and Xdebug, and the disk image, notarizes them with Apple, then staples the ticket. It reads the Apple credentials from `.secrets/signing.env`, which is git-ignored. Without that file, use `npm run make` for an unsigned build.
+`npm run make:mac` signs the app, the bundled PHP and Xdebug, and the disk image, notarises them with Apple, then staples the ticket. It reads the Apple credentials from `.secrets/signing.env`, which is git-ignored. Without that file, use `npm run make` for an unsigned build.
 
 macOS also needs Apple's Developer ID intermediate certificate before it trusts the signing certificate. If Keychain Access marks the certificate as not trusted, install [Developer ID Certification Authority - G2](https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer).
 
@@ -216,7 +216,7 @@ Its data lives in this app's folder, not in `~/.studio`. That means no shared si
 - **Database queries run in a worker.** SQLite is read through Node's own driver in a separate thread. The default connection is read-only. Write mode takes a backup, requires the site to be stopped, allows one statement at a time and closes the writable connection when it is turned off.
 - **Security.** The renderer is sandboxed with context isolation, no Node integration, a pinned navigation target, a strict CSP and an allowlist of external URL schemes. Every IPC handler checks the sender. Site paths and database paths come from the engine, never from the window.
 - **Theming.** All styling uses the `--wpds-*` tokens from `@wordpress/theme` and the components from `@wordpress/ui`, `@wordpress/admin-ui` and `@wordpress/dataviews`. ESLint refuses hard-coded colours and inline styles; stylelint refuses non-token colours and unknown tokens.
-- **Updates.** `SITERUN_UPDATE_FEED` can point at a JSON document (`{ version, url, notes }`); the app shows a banner when a newer version exists. Signing and in-place updates are a release decision, not something this build pretends to do.
+- **Updates.** `SITERUN_UPDATE_FEED` can point at a JSON document (`{ version, url, notes }`); the app shows a banner when a newer version exists. There is no in-place update yet.
 
 ## Privacy
 
@@ -229,15 +229,16 @@ Update checks are opt-in. Without a feed URL, the app makes no update request.
 The engine only makes a network request when it's fetching something you asked for:
 
 - `api.wordpress.org` for the list of WordPress versions, and `wordpress.org` when you choose a version other than the bundled one.
-- The PHP binary CDN when you choose a PHP version that is not bundled. The bundled version runs offline.
+- `appscdn.wordpress.com`, Automattic's PHP build CDN, when you choose a PHP version that is not bundled. The bundled version runs offline.
 - The URL of a Blueprint you open from the web.
 
-Blueprints from a file, folder or zip never leave the machine.
+Blueprints from a file, folder or zip never leave the machine. WordPress can make its own requests when a site runs, such as update checks; those come from WordPress, not siterun.
 
 ## Status and limitations
 
 - The engine is an adapted copy of Automattic's local WordPress tooling, not a dependency. It is trimmed to local sites; AI, account sign-in, sync, previews, MCP and `studio ui` are removed. Bringing in an upstream change means copying it into `engine/` and rebuilding.
 - Updates are a check and a download link, not an in-place update.
+- The macOS build is arm64 only; there is no Intel build yet.
 - Sites open in your browser. There is no embedded preview yet.
 - Windows and Linux have not been exercised on a real machine.
 - The first launch prepares the shared runtime, so it takes longer than every launch after it.
@@ -249,5 +250,7 @@ Every user-visible change is recorded in [`CHANGELOG.md`](CHANGELOG.md). Add an 
 ## Credits
 
 Built on Automattic's local WordPress work, the WordPress design system and WordPress itself. siterun is GPL-3.0-or-later. Bundled WordPress, PHP and other third-party components keep their own licences; see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
+siterun is not affiliated with or endorsed by Automattic or the WordPress project.
 
 Security reports: see [SECURITY.md](SECURITY.md).
