@@ -5,9 +5,18 @@
 	"private": true,
 	"license": "GPL-3.0-or-later",
 	"description": "The simplest way to run WordPress locally.",
+	"author": "GOING BOLD LTD",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/NewJenk/siterun.git"
+	},
+	"homepage": "https://github.com/NewJenk/siterun",
+	"bugs": {
+		"url": "https://github.com/NewJenk/siterun/issues"
+	},
 	"main": "dist/main/index.js",
 	"engines": {
-		"node": ">=22"
+		"node": ">=24"
 	},
 	"scripts": {
 		"build": "node scripts/build.mjs",
@@ -110,6 +119,14 @@
 				"filter": [
 					"**/*"
 				]
+			},
+			{
+				"from": "LICENSE.md",
+				"to": "LICENSE.md"
+			},
+			{
+				"from": "THIRD-PARTY-NOTICES.md",
+				"to": "THIRD-PARTY-NOTICES.md"
 			}
 		],
 		"mac": {

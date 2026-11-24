@@ -1,9 +1,9 @@
-# The GNU General Public License, Version 3, 29 June 2007 (GPLv3)
+                    GNU GENERAL PUBLIC LICENSE
+                       Version 3, 29 June 2007
 
-siterun is licensed under version 3 of the GNU General Public License, or (at your option) any later version.
-
-> Copyright (C) 2007 Free Software Foundation, Inc. <https://fsf.org/>
-> Everyone is permitted to copy and distribute verbatim copies of this license document, but changing it is not allowed.
+ Copyright (C) 2007 Free Software Foundation, Inc. <https://fsf.org/>
+ Everyone is permitted to copy and distribute verbatim copies
+ of this license document, but changing it is not allowed.
 
                             Preamble
 
@@ -672,3 +672,11 @@ may consider it more useful to permit linking proprietary applications with
 the library.  If this is what you want to do, use the GNU Lesser General
 Public License instead of this License.  But first, please read
 <https://www.gnu.org/licenses/why-not-lgpl.html>.
+
+---
+
+siterun is Copyright (C) 2026 GOING BOLD LTD and contributors, and is licensed under the GNU
+General Public License, version 3 or later. The engine in `engine/` is adapted
+from Automattic's Studio and keeps its original GPLv2 licence in
+`engine/cli/LICENSE.md`. Third-party components keep their own licences; see
+`THIRD-PARTY-NOTICES.md`.
