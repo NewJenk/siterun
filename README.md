@@ -41,7 +41,7 @@ To build it yourself, see [Run it](#run-it).
 
 ## Where everything lives
 
-This is what makes it different from the old local development stack. There is no system-wide PHP, MySQL, Apache or control panel. There is no installer that scatters a runtime through your home folder. There is no login item or background service after you quit.
+There is no system-wide PHP, MySQL, Apache or control panel. There is no installer that scatters a runtime through your home folder. There is no login item or background service after you quit.
 
 A site is a normal folder. The app is one normal folder. That is the whole map.
 
@@ -64,12 +64,10 @@ It contains:
 - `engine/`: the engine's runtime data. The site list, the PHP binary, the WordPress versions, the small must-use plugins, captured site email and the local server logs.
 - `backups/`: the database backups write mode takes before it lets you change anything.
 - `logs/`: the app's own log.
-- `preferences.json`: theme, default site folder and privacy choice.
+- `preferences.json`: theme and default site folder.
 - Electron's own cache and local storage.
 
-One runtime serves every site. It's downloaded or copied once, not once per site.
-
-If you used an earlier build, it kept its data in a differently named folder beside this one. The first launch of siterun moves the preferences, engine data and database backups across, and leaves the old browser caches behind.
+One runtime serves every site. It's prepared once, not once per site.
 
 The `engine/` folder in the app data is the engine's **data**. Its code is in this repository's [`engine/`](engine) folder. Both are described in [What is the engine?](#what-is-the-engine).
 
@@ -85,10 +83,6 @@ A plain local site touches nothing outside its folder and the app folder. Two op
 - **HTTPS** adds a locally trusted certificate to the system trust store, so the browser stops warning you.
 
 Deleting a site with its files moves the folder to the operating system's trash, so it is still recoverable.
-
-### If you already had `~/.studio`
-
-The first launch copies the site list and shared runtime from `~/.studio` into this app's folder. After that, siterun doesn't write there. The old install keeps its own copy.
 
 ## Requirements
 
@@ -153,7 +147,7 @@ macOS also needs Apple's Developer ID intermediate certificate before it trusts 
 
 ```
 src/main       Electron main: window, menu, IPC, CLI runner, site operations, database worker
-src/preload    The typed bridge exposed as window.studio
+src/preload    The typed IPC bridge exposed to the renderer
 src/renderer   React UI, built with the WordPress design system
 src/shared     Types and channel names used by all three
 engine         The site engine's source: the CLI, shared site code and Blueprints
@@ -164,7 +158,7 @@ tests          node:test for the pure logic
 
 ## What is the engine?
 
-The engine is a Node program adapted from Automattic's local WordPress tooling. It's the part that actually runs WordPress:
+The engine is a Node program built on Automattic's local WordPress tooling. It's the part that actually runs WordPress:
 
 - it reads and writes the site list;
 - it creates a site and copies WordPress into it;
@@ -174,14 +168,14 @@ The engine is a Node program adapted from Automattic's local WordPress tooling. 
 
 We don't reimplement any of that. The engine's source lives in `engine/`. The Electron main process forks the built CLI and speaks its IPC protocol, and the React window talks to the main process. The renderer never runs the engine directly.
 
-This copy keeps the local-site commands and drops the surfaces the app doesn't have: the AI agent, account sign-in, sync, previews, MCP and `studio ui`. The commands left are create, list, start, stop, status, delete, config, import/export, WP-CLI, blueprints and the hidden daemon shutdown.
+The engine handles local sites: create, list, start, stop, status, delete, config, import/export, WP-CLI, blueprints and the hidden daemon shutdown.
 
 ```
 siterun (Electron)
   renderer (React) ── IPC ── main process
                                  │ forks
                                  ▼
-                          Studio CLI (the engine)
+                          site engine
                                  │
                                  ├─ site list, create, start, stop, delete
                                  ├─ native PHP runtime + WordPress files
@@ -195,19 +189,17 @@ The engine is not a system service and it is not installed globally. It is a loc
 
 The engine's code is in this repository. Development builds load `engine/dist/cli/main.mjs`; a packaged build loads its copy from `resources/cli`. Building it is `npm run engine:build`, which `npm start` runs for you.
 
-Its data lives in this app's folder, not in `~/.studio`. That means no shared site list, PHP runtime or daemon with another Studio install.
+Its data lives in the app's folder:
 
-| What | Before | Now |
-| --- | --- | --- |
-| Engine code | An external checkout | `engine/` in this repository |
-| Site list and engine config | `~/.studio/config.json` | `<app data>/engine/config.json` |
-| PHP binary | `~/.studio/php-bin` | `<app data>/engine/php-bin` |
-| WordPress versions | `~/.studio/server-files` | `<app data>/engine/server-files` |
-| Must-use plugins | `~/.studio/mu-plugins` | `<app data>/engine/mu-plugins` |
-| Captured site email | `~/.studio/email` | `<app data>/engine/email` |
-| Process-manager sockets and logs | `~/.studio/daemon` | `<app data>/engine/daemon` |
-| Database backups | `~/Studio/.backups` | `<app data>/backups` |
-| Site files | The folder you choose | Unchanged |
+| What | Where |
+| --- | --- |
+| Site list and engine config | `<app data>/engine/config.json` |
+| PHP binary | `<app data>/engine/php-bin` |
+| WordPress versions | `<app data>/engine/server-files` |
+| Must-use plugins | `<app data>/engine/mu-plugins` |
+| Captured site email | `<app data>/engine/email` |
+| Process-manager sockets and logs | `<app data>/engine/daemon` |
+| Database backups | `<app data>/backups` |
 
 `<app data>` is `~/Library/Application Support/siterun` on macOS, `%APPDATA%\siterun` on Windows and `~/.config/siterun` on Linux.
 
@@ -236,7 +228,7 @@ Blueprints from a file, folder or zip never leave the machine. WordPress can mak
 
 ## Status and limitations
 
-- The engine is an adapted copy of Automattic's local WordPress tooling, not a dependency. It is trimmed to local sites; AI, account sign-in, sync, previews, MCP and `studio ui` are removed. Bringing in an upstream change means copying it into `engine/` and rebuilding.
+- The engine is built on Automattic's local WordPress tooling. Bringing in an upstream change means copying it into `engine/` and rebuilding.
 - Updates are a check and a download link, not an in-place update.
 - The macOS build is arm64 only; there is no Intel build yet.
 - Sites open in your browser. There is no embedded preview yet.
