@@ -69,4 +69,4 @@ The first public build of siterun: a separate Electron app, with no AI, no accou
 - Updates are a check and a download link, not an in-place update.
 - The macOS build is arm64 only; there is no Intel build yet.
 - The development app must be started from Terminal with `npm start`. Launching the raw Electron binary through Finder or `open` can be refused by macOS privacy protection on `~/Downloads`, which surfaces as an `EPERM` reading `package.json`. A packaged build in Applications does not have this problem.
-- Windows and Linux have not been exercised on a real machine yet.
+- I've only run it on macOS, so Windows and Linux are untested.

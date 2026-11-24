@@ -240,7 +240,7 @@ Blueprints from a file, folder or zip never leave the machine. WordPress can mak
 - Updates are a check and a download link, not an in-place update.
 - The macOS build is arm64 only; there is no Intel build yet.
 - Sites open in your browser. There is no embedded preview yet.
-- Windows and Linux have not been exercised on a real machine.
+- I've only run siterun on macOS, so the Windows and Linux builds are untested.
 - The first launch prepares the shared runtime, so it takes longer than every launch after it.
 
 ## Changelog
