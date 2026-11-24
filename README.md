@@ -147,6 +147,8 @@ All three build the engine and copy it to `vendor/cli`, then electron-builder sh
 
 `npm run make:mac` signs the app, the bundled PHP and Xdebug, and the disk image, notarizes them with Apple, then staples the ticket. It reads the Apple credentials from `.secrets/signing.env`, which is git-ignored. Without that file, use `npm run make` for an unsigned build.
 
+macOS also needs Apple's Developer ID intermediate certificate before it trusts the signing certificate. If Keychain Access marks the certificate as not trusted, install [Developer ID Certification Authority - G2](https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer).
+
 ## How it is put together
 
 ```
