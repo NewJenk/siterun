@@ -73,7 +73,7 @@
 		"cli-table3": "^0.6.5",
 		"date-fns": "^4.1.0",
 		"dotenv-cli": "^8.0.0",
-		"electron": "43.6.0",
+		"electron": "43.8.1",
 		"electron-builder": "^26.15.3",
 		"esbuild": "^0.28.2",
 		"eslint": "^9.39.5",
