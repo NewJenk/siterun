@@ -73,7 +73,7 @@ function resolveSiteIdentity(
 ): { site?: ConfigSite; error?: string } {
 	const trimmed = identity.trim();
 	if ( ! trimmed ) {
-		return { error: __( 'The specified directory is not added to Studio.' ) };
+		return { error: __( 'The specified directory is not a siterun site.' ) };
 	}
 
 	const byId = sites.find( ( site ) => site.id === trimmed );
@@ -92,11 +92,11 @@ function resolveSiteIdentity(
 
 	if ( isWordPressDirectory( resolvedPath ) ) {
 		return {
-			error: __( 'The specified directory is not added to Studio. Use `studio create` to add it.' ),
+			error: __( 'The specified directory is not a siterun site. Add it in the app first.' ),
 		};
 	}
 
-	return { error: __( 'The specified directory is not added to Studio.' ) };
+	return { error: __( 'The specified directory is not a siterun site.' ) };
 }
 
 function outcomeForSite(
@@ -365,12 +365,12 @@ async function deleteSite(
 	await updateConfig( ( { sites } ) => {
 		const siteIndex = sites.findIndex( ( s ) => arePathsEqual( s.path, site.path ) );
 		if ( siteIndex === -1 ) {
-			throw new LoggerError( __( 'The specified directory is not added to Studio.' ) );
+			throw new LoggerError( __( 'The specified directory is not a siterun site.' ) );
 		}
 		sites.splice( siteIndex, 1 );
 	} );
 
-	// The email the site sent and its file hashes live in Studio's directory, not the site's.
+	// The email the site sent and its file hashes live in siterun's directory, not the site's.
 	try {
 		fs.rmSync( getSiteEmailDirectory( site.id ), { recursive: true, force: true } );
 	} catch ( error ) {

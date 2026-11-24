@@ -17,23 +17,23 @@ test( 'slugify keeps a name readable and safe for a folder', () => {
 } );
 
 test( 'joinPath keeps the separator the parent uses', () => {
-	assert.equal( joinPath( '/Users/sam/Studio/', 'acme' ), '/Users/sam/Studio/acme' );
+	assert.equal( joinPath( '/Users/sam/siterun/', 'acme' ), '/Users/sam/siterun/acme' );
 	assert.equal( joinPath( 'C:\\Users\\sam\\Studio', 'acme' ), 'C:\\Users\\sam\\Studio\\acme' );
 } );
 
 test( 'proposedSitePath does not reuse a folder', () => {
-	const parent = '/Users/sam/Studio';
-	assert.equal( proposedSitePath( parent, 'Acme', [] ), '/Users/sam/Studio/acme' );
+	const parent = '/Users/sam/siterun';
+	assert.equal( proposedSitePath( parent, 'Acme', [] ), '/Users/sam/siterun/acme' );
 	assert.equal(
-		proposedSitePath( parent, 'Acme', [ '/Users/sam/Studio/acme' ] ),
-		'/Users/sam/Studio/acme-2'
+		proposedSitePath( parent, 'Acme', [ '/Users/sam/siterun/acme' ] ),
+		'/Users/sam/siterun/acme-2'
 	);
 	assert.equal(
 		proposedSitePath( parent, 'Acme', [
-			'/Users/sam/Studio/acme',
-			'/Users/sam/Studio/acme-2'
+			'/Users/sam/siterun/acme',
+			'/Users/sam/siterun/acme-2'
 		] ),
-		'/Users/sam/Studio/acme-3'
+		'/Users/sam/siterun/acme-3'
 	);
 } );
 
@@ -63,7 +63,7 @@ test( 'validateCreateForm names every missing answer', () => {
 test( 'validateCreateForm accepts a complete blank site', () => {
 	const errors = validateCreateForm( {
 		name: 'Portfolio',
-		parentDirectory: '/Users/sam/Studio',
+		parentDirectory: '/Users/sam/siterun',
 		sourceKind: 'blank',
 		blueprintPath: null,
 		backupPath: null,
@@ -76,7 +76,7 @@ test( 'validateCreateForm accepts a complete blank site', () => {
 test( 'HTTPS requires a custom domain', () => {
 	const errors = validateCreateForm( {
 		name: 'Portfolio',
-		parentDirectory: '/Users/sam/Studio',
+		parentDirectory: '/Users/sam/siterun',
 		sourceKind: 'blank',
 		blueprintPath: null,
 		backupPath: null,

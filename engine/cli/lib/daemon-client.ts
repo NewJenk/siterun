@@ -46,7 +46,7 @@ function eventsSocketPath( name: string ): string {
 	return path.join( EVENTS_SOCKET_DIR, `${ EVENTS_SOCKET_PREFIX }${ name }.sock` );
 }
 
-// One events socket per kind of Studio app, each owned by that app's `_events`. The
+// One events socket per kind of siterun app, each owned by that app's `_events`. The
 // desktop keeps the original path, which older desktop builds also listen on.
 export const EVENTS_SOCKET_PATHS = {
 	desktop: eventsSocketPath( 'events' ),
@@ -372,7 +372,7 @@ async function restartSites( processNames: string[] ) {
 				console.error(
 					sprintf(
 						// translators: %s: site name.
-						__( 'Studio was updated, and the site "%s" could not be started again.' ),
+						__( 'siterun was updated, and the site "%s" could not be started again.' ),
 						site.name
 					)
 				);
@@ -554,7 +554,7 @@ const eventsSocketClients = Object.values( EVENTS_SOCKET_PATHS ).map(
 );
 
 /**
- * Emit a CLI event to every Studio app's `_events` command. Apps that aren't running are skipped.
+ * Emit a CLI event to every siterun app's `_events` command. Apps that aren't running are skipped.
  */
 export async function emitCliEvent( payload: SocketEvent ): Promise< void > {
 	const mcpClients = liveMcpEventsSocketPaths().map(

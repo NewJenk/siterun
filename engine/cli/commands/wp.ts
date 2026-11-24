@@ -52,7 +52,7 @@ export async function commandHandler( argv: ArgumentsCamelCase< GlobalOptions > 
 		if ( parsedWpCliArgs._[ 0 ] === 'shell' ) {
 			throw new LoggerError(
 				__(
-					'Studio CLI does not support the WP-CLI `shell` command. Consider adding your code to a file and using the `eval` command.'
+					'siterun does not support the WP-CLI `shell` command. Consider adding your code to a file and using the `eval` command.'
 				)
 			);
 		}

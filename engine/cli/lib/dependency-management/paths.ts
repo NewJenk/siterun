@@ -14,8 +14,8 @@ function getExactPhpBinaryPath( version: string ): string {
 	return path.join( getPhpBinaryRoot(), version, PHP_BINARY_FILENAME );
 }
 
-// PHP binaries live in ~/.studio/php-bin/<package-id>/. The default version also ships with
-// Studio and is copied into this writable location by a CLI migration.
+// PHP binaries live in the engine's `php-bin` folder. The default version ships with
+// siterun and is copied into this writable location on first run.
 export function getPhpBinaryPath( version: SupportedPHPVersion | string ): string {
 	if ( ! isSupportedPHPVersion( version ) ) {
 		return getExactPhpBinaryPath( version );
@@ -84,7 +84,7 @@ export function getBlueprintsPharPath(): string {
 	return path.join( getWpFilesPath(), 'blueprints', 'blueprints.phar' );
 }
 
-// Studio's own PHP helper scripts ship read-only with the CLI bundle under
+// siterun's own PHP helper scripts ship read-only with the CLI bundle under
 // `dist/cli/php` (copied from `apps/cli/php` at build time by the `write-dist-extras`
 // vite plugin). `import.meta.dirname` resolves to the bundle output dir.
 function getBundledPhpPath(): string {

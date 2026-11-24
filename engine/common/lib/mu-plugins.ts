@@ -90,7 +90,7 @@ STUDIO_PREVIEW_SHORTCUTS;
 		`,
 	} );
 
-	// Capture PHP errors so a failed site start can show why (STU-1757).
+	// Capture PHP errors so a failed site start can show why.
 	if ( options.errorLogPath ) {
 		const stopAfterBoot = options.errorLogStopAfterBoot
 			? `if ( function_exists( 'add_action' ) ) {
@@ -258,7 +258,7 @@ STUDIO_PREVIEW_SHORTCUTS;
 	// Only an explicit `false` disables auto-updates. Sites created before this
 	// option existed have no flag, and every other reader treats that as
 	// auto-updating — reading it as falsy here left them pinned for good while
-	// Settings showed "latest" (STU-2348).
+	// Settings showed "latest".
 	if ( options.isWpAutoUpdating === false ) {
 		muPlugins.push( {
 			filename: '0-disable-auto-updates.php',
@@ -587,7 +587,7 @@ STUDIO_PREVIEW_SHORTCUTS;
 // Content-addressed, so every process that runs a site (the server, WP-CLI,
 // imports) resolves the same directory regardless of its TMPDIR. A loader
 // pointing at another process's temp directory falls outside the running
-// server's open_basedir (STU-2532).
+// server's open_basedir.
 function getMuPluginsDirectory( muPlugins: MuPlugin[] ): string {
 	const hash = createHash( 'sha256' );
 	for ( const plugin of muPlugins ) {

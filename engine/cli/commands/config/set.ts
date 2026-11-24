@@ -332,7 +332,7 @@ async function setSiteConfig( sitePath: string, options: SetCommandOptions ): Pr
 		await updateConfig( ( cliConfig ) => {
 			const foundSite = cliConfig.sites.find( ( s ) => arePathsEqual( s.path, sitePath ) );
 			if ( ! foundSite ) {
-				throw new LoggerError( __( 'The specified directory is not added to Studio.' ) );
+				throw new LoggerError( __( 'The specified directory is not a siterun site.' ) );
 			}
 
 			if ( nameChanged ) {
@@ -459,7 +459,7 @@ async function restoreAdminCredentials(
 	return updateConfig( ( cliConfig ) => {
 		const site = cliConfig.sites.find( ( s ) => s.id === siteId );
 		if ( ! site ) {
-			throw new LoggerError( __( 'The specified directory is not added to Studio.' ) );
+			throw new LoggerError( __( 'The specified directory is not a siterun site.' ) );
 		}
 		Object.assign( site, credentials );
 		return site;

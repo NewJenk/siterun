@@ -131,7 +131,7 @@ export async function commandHandler( argv: CommandArgs< typeof builder > ) {
 			await runCommand( Mode.STOP_ALL_SITES, undefined );
 		} else {
 			await runCommand( Mode.STOP_SINGLE_SITE, argv.path );
-			// Read after the operation is released, so Studio can show the site as it now is.
+			// Read after the operation is released, so the app can show the site as it now is.
 			defaultLogger.reportResult( {
 				...getSiteDetails( await getSiteByFolder( argv.path ) ),
 				running: false,

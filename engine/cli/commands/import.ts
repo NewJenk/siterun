@@ -49,7 +49,7 @@ async function setupWordPressFilesOnly( sitePath: string ): Promise< void > {
 	if ( ! fs.existsSync( bundledWpPath ) ) {
 		throw new LoggerError(
 			__(
-				'Cannot set up WordPress. Bundled WordPress files not found. Please connect to the internet or reinstall Studio.'
+				'Cannot set up WordPress. Bundled WordPress files not found. Please connect to the internet or reinstall siterun.'
 			),
 			undefined,
 			'bundled_wp_missing'

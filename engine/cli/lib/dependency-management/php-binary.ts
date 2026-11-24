@@ -27,7 +27,7 @@ export async function ensurePhpBinaryAvailable(
 		await downloadAndInstall( nativePhpVersion, onProgress );
 	}
 
-	// Idempotent — keeps php.ini in sync for existing installs after a Studio
+	// Idempotent — keeps php.ini in sync for existing installs after a siterun
 	// upgrade changes its contents.
 	await ensureNativePhpIniFiles( nativePhpVersion );
 }

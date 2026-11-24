@@ -25,7 +25,7 @@ export const builder = ( yargs: StudioArgv ) => {
 	return yargs
 		.option( 'id', {
 			type: 'string',
-			describe: __( 'Site ID (UUID format, used internally by Studio app)' ),
+			describe: __( 'Site ID (UUID format, used internally by the siterun app)' ),
 			hidden: true,
 			coerce: coerceSiteId,
 		} )

@@ -285,7 +285,7 @@ async function fileSize( filePath: string ): Promise< number > {
 const PHP_ERROR_TAIL_MAX_LINES = 50;
 
 // Appends the PHP errors recorded during this start attempt to the failure, so
-// users see why WordPress died instead of just "process exited..." (STU-1757).
+// users see why WordPress died instead of just "process exited...".
 async function withCapturedPhpErrors(
 	error: unknown,
 	logPath: string,

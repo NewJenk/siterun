@@ -212,7 +212,7 @@ function updateStudioBlock( content: string, updateFn: ( entries: string[] ) => 
 
 	const match = content.match( STUDIO_BLOCK_PATTERN );
 
-	// Edit the existing "block" of Studio entries
+	// Edit the existing "block" of siterun entries
 	if ( match ) {
 		const [ _, space, begin, block, end ] = match;
 

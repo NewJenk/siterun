@@ -12,11 +12,11 @@ export async function getSiteByFolder( siteFolder: string ): Promise< ConfigSite
 	if ( ! site ) {
 		if ( isWordPressDirectory( siteFolder ) ) {
 			throw new LoggerError(
-				__( 'The specified directory is not added to Studio. Use `studio create` to add it.' )
+				__( 'The specified directory is not a siterun site. Add it in the app first.' )
 			);
 		}
 
-		throw new LoggerError( __( 'The specified directory is not added to Studio.' ) );
+		throw new LoggerError( __( 'The specified directory is not a siterun site.' ) );
 	}
 
 	return site;

@@ -96,7 +96,7 @@ async function startSite(
 export async function commandHandler( argv: CommandArgs< typeof builder > ) {
 	try {
 		await runCommand( argv.path, argv.skipBrowser, argv.skipLogDetails );
-		// Read after the operation is released, so Studio can show the site as it now is.
+		// Read after the operation is released, so the app can show the site as it now is.
 		defaultLogger.reportResult( {
 			...getSiteDetails( await getSiteByFolder( argv.path ) ),
 			running: true,

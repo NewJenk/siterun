@@ -203,7 +203,7 @@ export async function runCommand(
 			if ( ! ( await pathExists( bundledWPPath ) ) ) {
 				throw new LoggerError(
 					__(
-						'Cannot set up WordPress. Bundled WordPress files not found. Please connect to the internet or reinstall Studio.'
+						'Cannot set up WordPress. Bundled WordPress files not found. Please connect to the internet or reinstall siterun.'
 					)
 				);
 			}

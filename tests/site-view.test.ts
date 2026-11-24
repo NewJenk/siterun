@@ -9,7 +9,7 @@ import {
 import { isNewer } from '../src/shared/version.ts';
 
 test( 'formatPath shows the home folder as a tilde', () => {
-	assert.equal( formatPath( '/Users/sam', '/Users/sam/Studio/acme' ), '~/Studio/acme' );
+	assert.equal( formatPath( '/Users/sam', '/Users/sam/siterun/acme' ), '~/siterun/acme' );
 	assert.equal( formatPath( '/Users/sam', '/Users/sam' ), '~' );
 	assert.equal( formatPath( '/Users/sam', '/opt/acme' ), '/opt/acme' );
 	assert.equal(
