@@ -23,7 +23,8 @@
 		"make": "npm run engine:bundle && npm run build:prod && electron-builder",
 		"engine:build": "vite build --config engine/vite.config.mjs",
 		"engine:watch": "vite build --config engine/vite.config.mjs --watch",
-		"engine:bundle": "npm run engine:build && node scripts/engine-bundle.mjs"
+		"engine:bundle": "npm run engine:build && node scripts/engine-bundle.mjs",
+		"make:mac": "npm run engine:bundle && npm run build:prod && dotenv -e .secrets/signing.env -- electron-builder --mac --arm64"
 	},
 	"devDependencies": {
 		"@automattic/generate-password": "^0.2.0",
@@ -62,6 +63,7 @@
 		"chokidar": "^5.0.0",
 		"cli-table3": "^0.6.5",
 		"date-fns": "^4.1.0",
+		"dotenv-cli": "^8.0.0",
 		"electron": "43.6.0",
 		"electron-builder": "^26.15.3",
 		"esbuild": "^0.28.2",
@@ -113,9 +115,18 @@
 		"mac": {
 			"category": "public.app-category.developer-tools",
 			"target": [
-				"dmg"
+				"dmg",
+				"zip"
 			],
-			"icon": "build/icon.icns"
+			"icon": "build/icon.icns",
+			"hardenedRuntime": true,
+			"gatekeeperAssess": false,
+			"entitlements": "build/entitlements.mac.plist",
+			"entitlementsInherit": "build/entitlements.mac.plist",
+			"binaries": [
+				"Contents/Resources/cli/php-bin/8.4.27-studio-2/php",
+				"Contents/Resources/cli/php-bin/8.4.27-studio-2/ext/xdebug.so"
+			]
 		},
 		"win": {
 			"target": [
