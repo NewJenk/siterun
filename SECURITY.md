@@ -28,6 +28,8 @@ Include the app version, your operating system, the steps to reproduce, the impa
 - WP-CLI execution and export/restore.
 - Sandbox escape, arbitrary file read or write, command injection, path traversal, privilege escalation, unsafe temporary files and dependency vulnerabilities.
 
+The custom-domain proxy listens on ports 80 and 443. The app writes both IPv4 and IPv6 loopback entries for those domains, and the proxy answers only for hosts it knows about. On a shared network, another device that sends the right Host header can reach a custom-domain site while it is running.
+
 ## Out of scope
 
 - Vulnerabilities in WordPress core, PHP, WP-CLI, plugins or themes. Report those to their own projects.

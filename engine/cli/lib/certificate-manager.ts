@@ -213,6 +213,8 @@ export async function generateSiteCertificate(
 		initializeCertificatesDirectory();
 		fs.writeFileSync( siteCertPath, certPem );
 		fs.writeFileSync( siteKeyPath, keyPem );
+		fs.chmodSync( siteCertPath, 0o600 );
+		fs.chmodSync( siteKeyPath, 0o600 );
 
 		return { cert: certPem, key: keyPem };
 	} catch ( error ) {
