@@ -24,7 +24,7 @@
 		"engine:build": "vite build --config engine/vite.config.mjs",
 		"engine:watch": "vite build --config engine/vite.config.mjs --watch",
 		"engine:bundle": "npm run engine:build && node scripts/engine-bundle.mjs",
-		"make:mac": "npm run engine:bundle && npm run build:prod && dotenv -e .secrets/signing.env -- electron-builder --mac --arm64"
+		"make:mac": "npm run engine:bundle && npm run build:prod && dotenv -e .secrets/signing.env -- electron-builder --mac --arm64 && dotenv -e .secrets/signing.env -- node scripts/notarize-dmg.mjs"
 	},
 	"devDependencies": {
 		"@automattic/generate-password": "^0.2.0",

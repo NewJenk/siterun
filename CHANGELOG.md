@@ -17,6 +17,7 @@ Every user-visible change goes here. Keep the newest entry first and say what ch
 
 ### Changed
 
+- **Signed and notarized for macOS.** The app, the disk image and the bundled PHP and Xdebug binaries are signed with a Developer ID, notarized by Apple and stapled, so macOS opens the download without a warning.
 - **Cleared out the last of the unused engine code.** phpMyAdmin was still in the engine with an 11 MB bundle, even though the app has its own database browser. It's gone, along with the Reprint and Simply Static leftovers from pull and static export. The database browser is the only database UI now.
 - **GPL-3.0-or-later.** The app, its engine copy and its license file now use GPL version 3 or later.
 - **A smaller menu bar.** The app menu now holds only About, Settings and Quit; File holds New Site and Close. Edit, View, Window and Help are gone, including developer tools, reload, zoom and the hide/show-all items. Copy, cut, paste, select all, undo and redo still work through their keyboard shortcuts.

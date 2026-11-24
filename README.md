@@ -19,6 +19,12 @@ The first launch prepares one shared runtime. After that, a site is ready in sec
 
 This is early, and it is deliberately small. The parts that matter are here. Enjoy.
 
+## Download
+
+Download the latest macOS build from [GitHub Releases](https://github.com/NewJenk/siterun/releases/latest). Open the DMG, drag siterun into Applications, then launch it. The app and the disk image are signed with a Developer ID and notarized by Apple, so macOS opens them without a warning.
+
+To build it yourself, see [Run it](#run-it).
+
 ## What it does
 
 - Create a site with a name, a folder, WordPress, PHP, and optionally a `.local` domain and HTTPS.
@@ -86,9 +92,9 @@ The first launch copies the site list and shared runtime from `~/.studio` into t
 
 ## Requirements
 
-This is a working preview, not a signed installer.
+The macOS build needs macOS 12 or later on Apple silicon. It is an arm64 build only; an Intel Mac is not supported yet.
 
-- Node 24.
+To build from source, you need Node 24.
 
 The site engine is part of this repository: its source is in `engine/`, and `npm start` builds it into `engine/dist/cli` before it starts the app. Nothing needs to be checked out or built from a different project.
 
@@ -134,9 +140,12 @@ SITERUN_E2E_SITE=1 npm run e2e -- site-journey
 ```sh
 npm run package   # an unpacked app in release/
 npm run make      # an installer for the current platform
+npm run make:mac  # a signed and notarized macOS DMG and zip
 ```
 
-Both build the engine and copy it to `vendor/cli`, then electron-builder ships that folder as `resources/cli`. The packaged app needs no checkout and no separate engine install.
+All three build the engine and copy it to `vendor/cli`, then electron-builder ships that folder as `resources/cli`. The packaged app needs no checkout and no separate engine install.
+
+`npm run make:mac` signs the app, the bundled PHP and Xdebug, and the disk image, notarizes them with Apple, then staples the ticket. It reads the Apple credentials from `.secrets/signing.env`, which is git-ignored. Without that file, use `npm run make` for an unsigned build.
 
 ## How it is put together
 
